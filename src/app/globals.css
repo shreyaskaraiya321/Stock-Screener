@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #090d16;
+  color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom Scrollbars */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #090d16;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Flash Animations for PriceCell */
+@keyframes flashGreenFade {
+  0% {
+    background-color: rgba(16, 185, 129, 0.4);
+    color: #34d399;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes flashRedFade {
+  0% {
+    background-color: rgba(244, 63, 94, 0.4);
+    color: #fb7185;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-flash-up {
+  animation: flashGreenFade 300ms ease-out forwards;
+}
+
+.animate-flash-down {
+  animation: flashRedFade 300ms ease-out forwards;
+}
