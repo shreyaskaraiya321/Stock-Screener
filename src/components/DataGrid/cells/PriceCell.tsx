@@ -10,14 +10,14 @@ export const PriceCell: React.FC<PriceCellProps> = React.memo(
   ({ price, flash }) => {
     const flashClass =
       flash === 'up'
-        ? 'animate-flash-up text-emerald-400 font-semibold'
+        ? 'animate-flash-up bg-emerald-500/20 text-emerald-400 font-semibold'
         : flash === 'down'
-        ? 'animate-flash-down text-rose-400 font-semibold'
+        ? 'animate-flash-down bg-rose-500/20 text-rose-400 font-semibold'
         : 'text-slate-100';
 
     return (
       <div
-        className={`px-2 py-1 rounded text-right font-mono text-xs tabular-nums transition-colors duration-200 ${flashClass}`}
+        className={`px-2 py-1 rounded text-right font-mono text-xs tabular-nums transition-colors duration-300 ${flashClass}`}
       >
         {formatINR(price)}
       </div>

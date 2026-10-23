@@ -107,6 +107,7 @@ export const ScreenerTable: React.FC = () => {
           <ChangeCell
             changePercent={row.original.changePercent}
             changeAbsolute={row.original.changeAbsolute}
+            flash={priceFlashes[row.original.symbol] ?? null}
           />
         ),
       },

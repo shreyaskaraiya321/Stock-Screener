@@ -9,6 +9,13 @@ import { FilterPreset, PRESET_MAP } from '@/lib/filterPresets';
 
 enableMapSet();
 
+export type ConnectionStatus = 'Connected' | 'Reconnecting' | 'Paused';
+
+export interface PriceUpdateRecord {
+  direction: 'up' | 'down';
+  timestamp: number;
+}
+
 export interface StockStoreState {
   stocks: Stock[];
   filteredStocks: Stock[];
@@ -20,24 +27,34 @@ export interface StockStoreState {
   watchlist: string[];
   pinnedColumns: string[];
   priceFlashes: Record<string, 'up' | 'down'>;
-  isStreaming: boolean;
+  
+  // Real-time streaming state (Step 5)
+  connectionStatus: ConnectionStatus;
+  isStreamingActive: boolean;
+  isStreaming: boolean; // Alias
+  lastPriceUpdates: Map<string, PriceUpdateRecord>;
+  latestTickCount: number;
 
   // Actions
   setStocks: (stocks: Stock[]) => void;
   setSelectedSymbol: (symbol: string | null) => void;
   toggleWatchlist: (symbol: string) => void;
   setSortConfig: (columnOrSort: keyof Stock | SortConfig | null) => void;
+  
+  // Step 5 Streaming Actions
+  toggleStreaming: () => void;
+  setStreaming: (isStreaming: boolean) => void;
+  setConnectionStatus: (status: ConnectionStatus) => void;
   batchUpdatePrices: (
-    updates: Map<string, { lastPrice: number; changePercent?: number; [key: string]: any }> | PriceUpdate[]
+    updates: Map<string, Partial<Stock>> | PriceUpdate[] | Map<string, any>
   ) => void;
   clearFlash: (symbol: string) => void;
-  setStreaming: (isStreaming: boolean) => void;
 
   // Filter Actions
   updateFilter: (field: string, value: any) => void;
   removeFilter: (field: string) => void;
   clearAllFilters: () => void;
-  clearFilters: () => void; // Alias
+  clearFilters: () => void;
   applyPreset: (presetNameOrPreset: string | FilterPreset) => void;
   toggleFilterPanel: () => void;
 }
@@ -58,7 +75,13 @@ export const useStockStore = create<StockStoreState>()(
       watchlist: ['RELIANCE', 'TCS', 'HDFCBANK'],
       pinnedColumns: ['symbol'],
       priceFlashes: {},
+
+      // Real-time streaming initial state
+      connectionStatus: 'Connected',
+      isStreamingActive: true,
       isStreaming: true,
+      lastPriceUpdates: new Map<string, PriceUpdateRecord>(),
+      latestTickCount: 0,
 
       setStocks: (stocks: Stock[]) => {
         set((state) => {
@@ -134,20 +157,52 @@ export const useStockStore = create<StockStoreState>()(
         });
       },
 
+      // Streaming Actions
+      toggleStreaming: () => {
+        set((state) => {
+          state.isStreamingActive = !state.isStreamingActive;
+          state.isStreaming = state.isStreamingActive;
+          state.connectionStatus = state.isStreamingActive ? 'Connected' : 'Paused';
+        });
+      },
+
+      setStreaming: (active: boolean) => {
+        set((state) => {
+          state.isStreamingActive = active;
+          state.isStreaming = active;
+          state.connectionStatus = active ? 'Connected' : 'Paused';
+        });
+      },
+
+      setConnectionStatus: (status: ConnectionStatus) => {
+        set((state) => {
+          state.connectionStatus = status;
+        });
+      },
+
       batchUpdatePrices: (
-        updates: Map<string, { lastPrice: number; changePercent?: number; [key: string]: any }> | PriceUpdate[]
+        updates: Map<string, Partial<Stock>> | PriceUpdate[] | Map<string, any>
       ) => {
         set((state) => {
-          const entries: [string, any][] =
+          const entries: [string, Partial<Stock>][] =
             updates instanceof Map
               ? Array.from(updates.entries())
               : updates.map((u) => [u.symbol, u]);
 
           if (entries.length === 0) return;
 
+          const now = Date.now();
+          state.latestTickCount = entries.length;
+
+          // Index maps for constant-time mutations
           const filteredMap = new Map<string, number>();
           for (let i = 0; i < state.filteredStocks.length; i++) {
             filteredMap.set(state.filteredStocks[i].symbol, i);
+          }
+
+          const masterMap = new Map<string, number>();
+          for (let i = 0; i < state.stocks.length; i++) {
+            masterMap.set(state.stocks[i].symbol, i);
           }
 
           for (const [sym, patch] of entries) {
@@ -156,12 +211,20 @@ export const useStockStore = create<StockStoreState>()(
               const stock = state.filteredStocks[filteredIdx];
               const oldPrice = stock.lastPrice;
               const newPrice = patch.lastPrice ?? oldPrice;
+              const direction: 'up' | 'down' = newPrice >= oldPrice ? 'up' : 'down';
 
               if (newPrice !== oldPrice) {
-                state.priceFlashes[sym] = newPrice > oldPrice ? 'up' : 'down';
+                state.priceFlashes[sym] = direction;
+                state.lastPriceUpdates.set(sym, { direction, timestamp: now });
               }
 
               Object.assign(stock, patch);
+            }
+
+            // Also synchronize in master stocks list
+            const masterIdx = masterMap.get(sym);
+            if (masterIdx !== undefined) {
+              Object.assign(state.stocks[masterIdx], patch);
             }
           }
         });
@@ -170,19 +233,13 @@ export const useStockStore = create<StockStoreState>()(
       clearFlash: (symbol: string) => {
         set((state) => {
           delete state.priceFlashes[symbol];
-        });
-      },
-
-      setStreaming: (isStreaming: boolean) => {
-        set((state) => {
-          state.isStreaming = isStreaming;
+          state.lastPriceUpdates.delete(symbol);
         });
       },
 
       // Filter Actions
       updateFilter: (field: string, value: any) => {
         set((state) => {
-          // If value is null, undefined, or empty array, remove filter
           if (
             value === null ||
             value === undefined ||

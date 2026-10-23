@@ -1,100 +1,102 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { useStockStore } from '@/stores/useStockStore';
-import { simulateBatchPriceTicks } from '@/lib/priceSimulator';
-import { PriceUpdate } from '@/types/stock';
+import { useEffect, useRef, useCallback } from 'react';
+import { useStockStore, ConnectionStatus } from '@/stores/useStockStore';
+import { simulateMarketTick } from '@/lib/priceSimulator';
+import { Stock } from '@/types/stock';
 
-export type ConnectionStatus = 'Connected' | 'Reconnecting' | 'Paused';
+export type { ConnectionStatus };
 
 export function useRealtimePrices() {
   const stocks = useStockStore((s) => s.stocks);
-  const isStreaming = useStockStore((s) => s.isStreaming);
-  const setStreaming = useStockStore((s) => s.setStreaming);
+  const isStreamingActive = useStockStore((s) => s.isStreamingActive);
+  const connectionStatus = useStockStore((s) => s.connectionStatus);
+  const toggleStreaming = useStockStore((s) => s.toggleStreaming);
+  const setConnectionStatus = useStockStore((s) => s.setConnectionStatus);
   const batchUpdatePrices = useStockStore((s) => s.batchUpdatePrices);
 
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('Connected');
+  // Performance batching buffer
+  const pendingUpdates = useRef<Map<string, Partial<Stock>>>(new Map());
+  const rafId = useRef<number | null>(null);
 
-  // Buffer for rAF batching
-  const bufferRef = useRef<Map<string, PriceUpdate>>(new Map());
-  const rafIdRef = useRef<number | null>(null);
-  const intervalIdRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isUnmountedRef = useRef(false);
+  // Timers and backoff tracking
+  const intervalId = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  const backoffDelay = useRef<number>(1000); // Exponential backoff starts at 1s
+  const isUnmounted = useRef<boolean>(false);
 
-  // Flush buffer to Zustand store on animation frame
-  const flushBuffer = useCallback(() => {
-    if (bufferRef.current.size > 0 && !isUnmountedRef.current) {
-      const updates = Array.from(bufferRef.current.values());
-      bufferRef.current.clear();
-      batchUpdatePrices(updates);
+  // requestAnimationFrame batch flush
+  const scheduleBatchFlush = useCallback(() => {
+    if (!rafId.current) {
+      rafId.current = requestAnimationFrame(() => {
+        if (pendingUpdates.current.size > 0 && !isUnmounted.current) {
+          batchUpdatePrices(pendingUpdates.current);
+          pendingUpdates.current.clear();
+        }
+        rafId.current = null;
+      });
     }
-    rafIdRef.current = null;
   }, [batchUpdatePrices]);
 
-  const scheduleFlush = useCallback(() => {
-    if (rafIdRef.current === null) {
-      rafIdRef.current = requestAnimationFrame(flushBuffer);
-    }
-  }, [flushBuffer]);
-
+  // Main streaming loop simulation
   useEffect(() => {
-    isUnmountedRef.current = false;
+    isUnmounted.current = false;
 
-    if (!isStreaming) {
+    if (!isStreamingActive) {
       setConnectionStatus('Paused');
-      if (intervalIdRef.current) clearInterval(intervalIdRef.current);
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (intervalId.current) clearInterval(intervalId.current);
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
       return;
     }
 
     setConnectionStatus('Connected');
+    backoffDelay.current = 1000;
 
-    // Simulate mock WebSocket ticker every 1500ms
-    intervalIdRef.current = setInterval(() => {
-      if (isUnmountedRef.current || !isStreaming || stocks.length === 0) return;
+    // Simulate WebSocket tick stream every 1,500ms
+    intervalId.current = setInterval(() => {
+      if (isUnmounted.current || !isStreamingActive || stocks.length === 0) return;
 
-      // Occasional simulated reconnect (0.5% chance)
-      if (Math.random() < 0.005) {
+      // Rare simulated disconnect to exercise exponential backoff reconnection
+      if (Math.random() < 0.003) {
         setConnectionStatus('Reconnecting');
-        if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          if (!isUnmountedRef.current && isStreaming) {
+        const delay = backoffDelay.current;
+        backoffDelay.current = Math.min(16000, backoffDelay.current * 2);
+
+        if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+        reconnectTimeout.current = setTimeout(() => {
+          if (!isUnmounted.current && isStreamingActive) {
             setConnectionStatus('Connected');
+            backoffDelay.current = 1000;
           }
-        }, 1200);
+        }, delay);
         return;
       }
 
       // Generate ticks for 10-25 random stocks
       const count = Math.floor(10 + Math.random() * 16);
-      const ticks = simulateBatchPriceTicks(stocks, count);
+      const tickMap = simulateMarketTick(stocks, count);
 
-      // Accumulate into rAF buffer
-      for (const tick of ticks) {
-        bufferRef.current.set(tick.symbol, tick);
+      // Accumulate into pendingUpdates buffer
+      for (const [symbol, data] of tickMap.entries()) {
+        pendingUpdates.current.set(symbol, data);
       }
 
-      scheduleFlush();
+      scheduleBatchFlush();
     }, 1500);
 
-    // Clean up all timers and rAF on unmount (Fixed Section A4.2 bug)
+    // Teardown timers and cancel rAF to prevent memory leaks
     return () => {
-      isUnmountedRef.current = true;
-      if (intervalIdRef.current) clearInterval(intervalIdRef.current);
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
+      isUnmounted.current = true;
+      if (intervalId.current) clearInterval(intervalId.current);
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+      if (rafId.current !== null) {
+        cancelAnimationFrame(rafId.current);
+        rafId.current = null;
       }
     };
-  }, [isStreaming, stocks, scheduleFlush]);
-
-  const toggleStreaming = useCallback(() => {
-    setStreaming(!isStreaming);
-  }, [isStreaming, setStreaming]);
+  }, [isStreamingActive, stocks, scheduleBatchFlush, setConnectionStatus]);
 
   return {
     connectionStatus,
-    isStreaming,
+    isStreaming: isStreamingActive,
     toggleStreaming,
   };
 }

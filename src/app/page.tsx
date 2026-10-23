@@ -181,16 +181,46 @@ export default function StockScreenerPage() {
 
         {/* Status Badge & Actions */}
         <div className="flex items-center space-x-2.5">
-          {/* Market Status Badge */}
-          <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-800/60 text-xs">
+          {/* Live Status Indicator Pill */}
+          <div
+            className={`flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs transition-colors ${
+              connectionStatus === 'Connected'
+                ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-400'
+                : connectionStatus === 'Reconnecting'
+                ? 'bg-amber-950/60 border-amber-800/60 text-amber-400'
+                : 'bg-slate-900 border-slate-700 text-slate-400'
+            }`}
+          >
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              {connectionStatus === 'Connected' && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  connectionStatus === 'Connected'
+                    ? 'bg-emerald-500'
+                    : connectionStatus === 'Reconnecting'
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-slate-500'
+                }`}
+              ></span>
             </span>
-            <span className="font-medium text-emerald-400 text-[11px] whitespace-nowrap">
-              Simulated Market Active
+            <span className="font-medium text-[11px] whitespace-nowrap">
+              {connectionStatus === 'Connected'
+                ? 'Live Market (WebSocket Active)'
+                : connectionStatus === 'Reconnecting'
+                ? 'Reconnecting...'
+                : 'Stream Paused'}
             </span>
           </div>
+
+          {/* Tick Rate Badge */}
+          {connectionStatus === 'Connected' && (
+            <div className="hidden xl:flex items-center space-x-1 px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/40 text-[10px] font-mono text-indigo-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+              <span>~15 updates/sec</span>
+            </div>
+          )}
 
           {/* Pause / Resume Stream */}
           <button

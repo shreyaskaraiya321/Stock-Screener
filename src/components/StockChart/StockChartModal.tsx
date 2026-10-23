@@ -36,6 +36,7 @@ export const StockChartModal: React.FC = () => {
   // Chart DOM refs
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const rsiContainerRef = useRef<HTMLDivElement>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
   // Indicator toggle state
   const [indicators, setIndicators] = useState({
@@ -387,15 +388,37 @@ export const StockChartModal: React.FC = () => {
 
     window.addEventListener('resize', handleResize);
 
+    candleSeriesRef.current = candleSeries;
+
     // Clean up and destroy chart instances on unmount to avoid memory leaks
     return () => {
       window.removeEventListener('resize', handleResize);
+      candleSeriesRef.current = null;
       mainChart.remove();
       if (rsiChart) {
         rsiChart.remove();
       }
     };
   }, [selectedSymbol, displayOHLCV, indicators, sma20, sma50, sma200, ema12, ema26, bb, rsiData]);
+
+  // Synchronize incoming real-time streaming price ticks to active candlestick series
+  useEffect(() => {
+    if (!candleSeriesRef.current || !stock || displayOHLCV.length === 0) return;
+    const latest = displayOHLCV[displayOHLCV.length - 1];
+    if (latest) {
+      try {
+        candleSeriesRef.current.update({
+          time: latest.time as Time,
+          open: latest.open,
+          high: Math.max(latest.high, stock.lastPrice),
+          low: Math.min(latest.low, stock.lastPrice),
+          close: stock.lastPrice,
+        });
+      } catch (err) {
+        // Safe catch for timeframe re-renders
+      }
+    }
+  }, [stock?.lastPrice, displayOHLCV, stock]);
 
   if (!selectedSymbol || !stock) return null;
 

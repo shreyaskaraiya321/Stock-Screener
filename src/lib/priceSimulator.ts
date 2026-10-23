@@ -1,41 +1,71 @@
-import { Stock, PriceUpdate, Sector } from '@/types/stock';
+import { Stock, PriceUpdate, Sector, MarketCapCategory } from '@/types/stock';
 
 /**
  * Standard Normal Box-Muller Transform
- * Generates N(0, 1) standard normal variate
+ * Generates Z ~ N(0, 1) standard normal variate
+ * Z = sqrt(-2 * ln(u1)) * cos(2 * PI * u2)
  */
 export function boxMullerRandom(): number {
-  let u = 0;
-  let v = 0;
-  while (u === 0) u = Math.random(); // Converting [0,1) to (0,1)
-  while (v === 0) v = Math.random();
-  return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  let u1 = 0;
+  let u2 = 0;
+  while (u1 === 0) u1 = Math.random(); // Converting [0,1) to (0,1)
+  while (u2 === 0) u2 = Math.random();
+  return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
 }
 
 /**
- * Geometric Brownian Motion with Market & Sector Correlation
- * dS = S * (drift * dt + volatility * sqrt(dt) * Z)
- * Z = sqrt(rho) * Z_sector + sqrt(1 - rho) * Z_idiosyncratic
+ * Tailored volatility by SEBI Market Cap Category
  */
-export function simulateBatchPriceTicks(
+export function getCategoryVolatility(category: MarketCapCategory): number {
+  switch (category) {
+    case 'Large Cap':
+      return 0.015;
+    case 'Mid Cap':
+      return 0.025;
+    case 'Small Cap':
+    case 'Micro Cap':
+    default:
+      return 0.04;
+  }
+}
+
+export interface MarketTickData {
+  lastPrice: number;
+  changePercent: number;
+  changeAbsolute: number;
+  dayHigh: number;
+  dayLow: number;
+  volume: number;
+  flash?: 'up' | 'down' | null;
+}
+
+/**
+ * Geometric Brownian Motion with Sector Correlation
+ * dS = S * (drift * dt + volatility * sqrt(dt) * combinedShock)
+ * combinedShock = sectorCorrelation * Z_sector + sqrt(1 - sectorCorrelation^2) * Z_individual
+ */
+export function simulateMarketTick(
   stocks: Stock[],
-  count = 20
-): PriceUpdate[] {
-  if (stocks.length === 0) return [];
+  tickCount = 15
+): Map<string, MarketTickData> {
+  const result = new Map<string, MarketTickData>();
+  if (stocks.length === 0) return result;
 
-  // 1. Generate sector-wide systemic shocks
+  const drift = 0.0001;
+  const dt = 1 / 252; // 1 trading day time increment
+  const sqrtDt = Math.sqrt(dt);
+  const sectorCorrelation = 0.6; // 60% sector macro trend
+  const sqrtUncorrelated = Math.sqrt(1 - sectorCorrelation * sectorCorrelation);
+
+  // Sector shocks cache for correlated sector trends
   const sectorShocks: Partial<Record<Sector, number>> = {};
-  const rho = 0.45; // 45% correlation to sector macro move
-  const dt = 1 / (252 * 6.5 * 60); // Intraday minute-fraction time increment
-  const marketDrift = 0.0001; // slight positive market bias
 
-  // 2. Select `count` unique random stocks
-  const updates: PriceUpdate[] = [];
-  const selectedIndices = new Set<number>();
+  // Choose 10 to 25 random stocks
   const totalStocks = stocks.length;
-  const targetCount = Math.min(count, totalStocks);
+  const count = Math.min(Math.max(10, tickCount), totalStocks);
+  const selectedIndices = new Set<number>();
 
-  while (selectedIndices.size < targetCount) {
+  while (selectedIndices.size < count) {
     const idx = Math.floor(Math.random() * totalStocks);
     selectedIndices.add(idx);
   }
@@ -43,45 +73,63 @@ export function simulateBatchPriceTicks(
   for (const idx of Array.from(selectedIndices)) {
     const stock = stocks[idx];
 
-    // Lazy instantiate sector shock
+    // Lazy instantiate shared sector shock
     if (sectorShocks[stock.sector] === undefined) {
       sectorShocks[stock.sector] = boxMullerRandom();
     }
     const zSector = sectorShocks[stock.sector]!;
-    const zIdio = boxMullerRandom();
+    const zIndividual = boxMullerRandom();
 
-    // Combined correlated normal shock
-    const z = Math.sqrt(rho) * zSector + Math.sqrt(1 - rho) * zIdio;
+    // Blended correlated shock
+    const combinedShock = sectorCorrelation * zSector + sqrtUncorrelated * zIndividual;
 
-    // Annualized volatility adjusted by stock Beta
-    const annualVol = 0.22 * stock.beta;
-    const returnShock = marketDrift * dt + annualVol * Math.sqrt(dt) * z;
+    // Volatility by market cap tier adjusted with Beta
+    const baseVol = getCategoryVolatility(stock.marketCapCategory);
+    const volatility = baseVol * Math.max(0.5, stock.beta);
 
-    // Apply Geometric Brownian Motion step
-    const currentPrice = stock.lastPrice;
-    let nextPrice = Number((currentPrice * (1 + returnShock)).toFixed(2));
+    // Geometric Brownian Motion step
+    const dS = stock.lastPrice * (drift * dt + volatility * sqrtDt * combinedShock);
+    let nextPrice = Number((stock.lastPrice + dS).toFixed(2));
 
-    // Floor to minimum 1.00 INR
-    if (nextPrice < 1) nextPrice = 1.0;
+    // Floor at 1.00 INR
+    if (nextPrice < 1.0) nextPrice = 1.0;
 
-    const changeAbsolute = Number((nextPrice - stock.previousClose).toFixed(2));
-    const changePercent = Number(
-      ((changeAbsolute / stock.previousClose) * 100).toFixed(2)
-    );
+    const previousClose = stock.previousClose;
+    const changeAbsolute = Number((nextPrice - previousClose).toFixed(2));
+    const changePercent = Number(((changeAbsolute / previousClose) * 100).toFixed(2));
 
     const dayHigh = Math.max(stock.dayHigh, nextPrice);
     const dayLow = Math.min(stock.dayLow, nextPrice);
-    const additionalVolume = Math.floor(100 + Math.random() * 2500);
+    const volumeDelta = Math.floor(50 + Math.random() * 2000);
 
-    updates.push({
-      symbol: stock.symbol,
+    const flash: 'up' | 'down' | null =
+      nextPrice > stock.lastPrice ? 'up' : nextPrice < stock.lastPrice ? 'down' : null;
+
+    result.set(stock.symbol, {
       lastPrice: nextPrice,
-      changeAbsolute,
       changePercent,
+      changeAbsolute,
       dayHigh,
       dayLow,
-      volume: stock.volume + additionalVolume,
-      flash: nextPrice > currentPrice ? 'up' : nextPrice < currentPrice ? 'down' : null,
+      volume: stock.volume + volumeDelta,
+      flash,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Array format wrapper for backwards compatibility
+ */
+export function simulateBatchPriceTicks(stocks: Stock[], count = 20): PriceUpdate[] {
+  const tickMap = simulateMarketTick(stocks, count);
+  const updates: PriceUpdate[] = [];
+
+  for (const [symbol, data] of tickMap.entries()) {
+    updates.push({
+      symbol,
+      ...data,
     });
   }
 
