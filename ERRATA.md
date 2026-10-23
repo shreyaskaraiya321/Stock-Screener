@@ -4,72 +4,72 @@ This document details the three deliberate specification errors identified and r
 
 ---
 
-### 1. Section A9.2: Type Declaration Syntax Bug
+### 1. Section A9.2: Syntax Error in Type Declaration
 
 - **Original Specification**:
   ```typescript
-  // Erroneous declaration in spec
-  data: Stock()
+  Map<string, { data: Stock(); timestamp: number }>
   ```
 - **Identified Issue**:
-  `Stock()` represents an invalid invocation syntax in TypeScript interface/type definitions rather than an array type definition.
-- **Resolution**:
-  Corrected to strict TypeScript array notation `Stock[]` or `Array<Stock>`:
+  The type declaration contained a syntax error invoking `Stock()`. In TypeScript, interfaces and type aliases cannot be invoked with parentheses in type positions. Doing so results in a compilation error: `TS2304: Cannot find name 'Stock' or type cannot be called as a function`.
+- **Correction**:
+  Corrected to an array type notation `Stock[]` (or `Array<Stock>`):
   ```typescript
-  export interface StockDataPayload {
-    data: Stock[];
-  }
+  Map<string, { data: Stock[]; timestamp: number }>
   ```
-  Applied across [stock.ts](file:///d:/Stock%20Screener/src/types/stock.ts) and [ScreenerTable.tsx](file:///d:/Stock%20Screener/src/components/DataGrid/ScreenerTable.tsx).
+  Applied across [stock.ts](file:///d:/Stock%20Screener/src/types/stock.ts), [useStockStore.ts](file:///d:/Stock%20Screener/src/stores/useStockStore.ts), and [ScreenerTable.tsx](file:///d:/Stock%20Screener/src/components/DataGrid/ScreenerTable.tsx).
 
 ---
 
-### 2. Section A4.2: WebSocket Hook Reconnection Leaks & Timer Overlaps
+### 2. Section A4.2: WebSocket Reconnection Memory Leak & Timer Overlaps
 
 - **Original Specification**:
-  The reconnection loop logic triggered asynchronous timeout callbacks without maintaining an unmount cancellation ref (`isUnmountedRef`) or clearing existing reconnection timeout handles when the connection state toggles or the component unmounts.
+  The `useWebSocket` (implemented as `useRealtimePrices`) reconnection routine scheduled reconnect attempts using `setTimeout` within asynchronous callbacks without tracking an unmount cleanup ref or canceling pending timers on disconnect or unmount.
 - **Identified Issue**:
-  1. Memory leaks when components remount (e.g. Next.js App Router hot reloading or route transitions).
-  2. Overlapping, concurrent timeout timers firing multiple duplicate reconnection state transitions and duplicate buffer flushes.
-  3. Attempting to invoke `requestAnimationFrame` and state setters on unmounted components.
-- **Resolution**:
-  In [useRealtimePrices.ts](file:///d:/Stock%20Screener/src/hooks/useRealtimePrices.ts):
-  - Introduced `isUnmountedRef` checked before any asynchronous state mutation or store dispatch.
-  - Retained `intervalIdRef`, `reconnectTimeoutRef`, and `rafIdRef`.
-  - Added comprehensive teardown in the `useEffect` cleanup return function:
-    ```typescript
-    return () => {
-      isUnmountedRef.current = true;
-      if (intervalIdRef.current) clearInterval(intervalIdRef.current);
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-    };
-    ```
-
----
-
-### 3. Section A3.2: Bollinger Band Lower Band Formula Typo
-
-- **Original Specification**:
-  Lower Band specified as:
-  ```text
-  Lower Band = SMA(20) + 2 * SD  // Typo: Missing minus sign
-  ```
-- **Identified Issue**:
-  Using an addition operator causes the Lower Band to be identical to the Upper Band instead of tracking 2 standard deviations below the 20-period moving average.
-- **Resolution**:
-  In [indicators.ts](file:///d:/Stock%20Screener/src/lib/indicators.ts), corrected Lower Band calculation to subtract two standard deviations using population variance ($N$ observations):
+  1. Component unmounting (or React StrictMode remounting in development) left active timeout callbacks running, invoking state setters and store dispatches on unmounted instances.
+  2. Frequent network disconnects or toggle events spawned multiple overlapping reconnection timers, causing duplicate parallel connection loops and concurrent `requestAnimationFrame` cascades.
+- **Correction**:
+  - Maintained dedicated refs: `isUnmountedRef`, `reconnectTimeoutRef`, `intervalIdRef`, and `rafIdRef`.
+  - Stored every timeout ID in `reconnectTimeoutRef` and cleared prior timers before scheduling new ones.
+  - Added comprehensive teardown in the cleanup effect to cancel pending timeouts, intervals, and animation frame requests:
   ```typescript
-  const variance = window.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / period;
-  const sd = Math.sqrt(variance);
-
-  result[i] = {
-    middle: Number(mean.toFixed(2)),
-    upper: Number((mean + multiplier * sd).toFixed(2)),
-    lower: Number((mean - multiplier * sd).toFixed(2)), // Fixed minus sign
+  return () => {
+    isUnmountedRef.current = true;
+    if (intervalIdRef.current) {
+      clearInterval(intervalIdRef.current);
+      intervalIdRef.current = null;
+    }
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
   };
   ```
-  Validated and verified with automated test cases in [indicators.test.ts](file:///d:/Stock%20Screener/tests/indicators.test.ts).
+  Implemented in [useRealtimePrices.ts](file:///d:/Stock%20Screener/src/hooks/useRealtimePrices.ts).
+
+---
+
+### 3. Section A3.2: Bollinger Band Lower Band Formula Omission
+
+- **Original Specification**:
+  The Lower Bollinger Band formula read:
+  ```text
+  Lower Band = SMA(20) 2* standard deviation
+  ```
+  omitting the minus sign operator entirely.
+- **Identified Issue**:
+  Without the minus sign operator (`-`), the formula is mathematically incomplete and ambiguous, resulting in syntax errors or incorrect values identical to or multiplying by the upper band.
+- **Correction**:
+  Corrected to subtract two times the population standard deviation from the 20-period Simple Moving Average:
+  ```text
+  Lower Band = SMA(20) - 2 * standard deviation
+  ```
+  Mathematically implemented using population standard deviation ($N$ observations in the rolling window):
+  $$\sigma = \sqrt{\frac{1}{N} \sum_{i=1}^N (P_i - \mu)^2}$$
+  $$\text{Upper Band} = \mu + 2\sigma$$
+  $$\text{Lower Band} = \mu - 2\sigma$$
+  Implemented in [indicators.ts](file:///d:/Stock%20Screener/src/lib/indicators.ts) and validated in [indicators.test.ts](file:///d:/Stock%20Screener/tests/indicators.test.ts).
