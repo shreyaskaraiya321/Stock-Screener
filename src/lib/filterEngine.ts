@@ -1,135 +1,287 @@
 import { Stock, FilterConfig, SortConfig } from '@/types/stock';
 
-// Weighting to order predicates: numeric ranges are cheapest & eliminate most candidates first
-const OPERATOR_PRECEDENCE: Record<string, number> = {
-  between: 1,
-  gte: 2,
-  lte: 3,
-  gt: 4,
-  lt: 5,
-  eq: 6,
-  neq: 7,
-  in: 8,
-};
-
 export interface FilterResult {
-  filtered: Stock[];
+  filteredStocks: Stock[];
+  filtered: Stock[]; // Alias for backwards compatibility
   executionTimeMs: number;
 }
 
-/**
- * Evaluates a single stock against a filter config
- */
-function evaluatePredicate(stock: Stock, filter: FilterConfig, watchlist?: Set<string>): boolean {
-  if (filter.id === 'watchlist-only') {
-    return watchlist ? watchlist.has(stock.symbol) : false;
-  }
+export type FilterValue =
+  | { min?: number | null; max?: number | null }
+  | [number, number]
+  | string[]
+  | string
+  | number
+  | boolean
+  | null
+  | undefined;
 
-  // Custom calculated field: priceVsSma50 or priceVsSma200
-  if (filter.field === ('priceVsSma50' as any)) {
-    if (filter.value === 'Above') return stock.lastPrice > stock.sma50;
-    if (filter.value === 'Below') return stock.lastPrice <= stock.sma50;
-    return true;
-  }
-  if (filter.field === ('priceVsSma200' as any)) {
-    if (filter.value === 'Above') return stock.lastPrice > stock.sma200;
-    if (filter.value === 'Below') return stock.lastPrice <= stock.sma200;
-    return true;
-  }
+export type ActiveFiltersState = Record<string, FilterValue>;
 
-  const rawVal = stock[filter.field];
+// Numerical fields for selectivity reordering (evaluated first)
+const NUMERICAL_FIELDS = new Set([
+  'marketCap',
+  'pe',
+  'pb',
+  'dividendYield',
+  'roe',
+  'roce',
+  'debtToEquity',
+  'currentRatio',
+  'promoterHolding',
+  'revenueGrowthYoY',
+  'profitGrowthYoY',
+  'rsi14',
+  'week52High',
+  'week52Low',
+  'priceVsSma50',
+  'priceVsSma200',
+]);
 
-  switch (filter.operator) {
-    case 'eq':
-      return rawVal === filter.value;
+const SINGLE_SELECT_FIELDS = new Set(['macdSignal', 'bollingerPosition', 'volumeVsAvg']);
+const CATEGORICAL_FIELDS = new Set(['sector', 'marketCapCategory', 'indexMembership']);
 
-    case 'neq':
-      return rawVal !== filter.value;
-
-    case 'gte':
-      return typeof rawVal === 'number' && rawVal >= filter.value;
-
-    case 'gt':
-      return typeof rawVal === 'number' && rawVal > filter.value;
-
-    case 'lte':
-      return typeof rawVal === 'number' && rawVal <= filter.value;
-
-    case 'lt':
-      return typeof rawVal === 'number' && rawVal < filter.value;
-
-    case 'between': {
-      if (typeof rawVal !== 'number') return false;
-      const [min, max] = filter.value as [number, number];
-      return rawVal >= min && rawVal <= max;
-    }
-
-    case 'in': {
-      // Support array containment (e.g., indexMembership) or single value in array
-      const arr = Array.isArray(filter.value) ? filter.value : [filter.value];
-      if (arr.length === 0) return true;
-      if (Array.isArray(rawVal)) {
-        return rawVal.some((item) => arr.includes(item));
-      }
-      return arr.includes(rawVal);
-    }
-
-    default:
-      return true;
-  }
+interface CompiledPredicate {
+  field: string;
+  type: 'range' | 'multi' | 'single' | 'boolean' | 'legacy';
+  evalFn: (stock: Stock, watchlistSet?: Set<string>) => boolean;
 }
 
 /**
- * High-Performance Combinatorial Filter Engine
- * Automatically sorts predicates so numeric range filters run before multi-selects.
- * Uses short-circuit evaluation for sub-200ms processing on 5,000+ stocks.
+ * Compiles and re-orders active filters by selectivity so expensive multi-selects run last
+ */
+function compileFilters(
+  filters: ActiveFiltersState | FilterConfig[],
+  watchlistSet?: Set<string>
+): CompiledPredicate[] {
+  const predicates: CompiledPredicate[] = [];
+
+  // Handle Array of FilterConfig (legacy / benchmark test)
+  if (Array.isArray(filters)) {
+    for (const f of filters) {
+      if (!f.enabled) continue;
+      predicates.push({
+        field: String(f.field),
+        type: NUMERICAL_FIELDS.has(String(f.field)) ? 'range' : 'legacy',
+        evalFn: (stock) => {
+          if (f.id === 'watchlist-only' || f.field === ('watchlistOnly' as any)) {
+            return watchlistSet ? watchlistSet.has(stock.symbol) : false;
+          }
+          if (f.field === ('priceVsSma50' as any)) {
+            if (f.value === 'Above') return stock.lastPrice > stock.sma50;
+            if (f.value === 'Below') return stock.lastPrice <= stock.sma50;
+            return true;
+          }
+          if (f.field === ('priceVsSma200' as any)) {
+            if (f.value === 'Above') return stock.lastPrice > stock.sma200;
+            if (f.value === 'Below') return stock.lastPrice <= stock.sma200;
+            return true;
+          }
+
+          const rawVal = stock[f.field];
+          switch (f.operator) {
+            case 'eq':
+              return rawVal === f.value;
+            case 'neq':
+              return rawVal !== f.value;
+            case 'gte':
+              return typeof rawVal === 'number' && rawVal >= f.value;
+            case 'gt':
+              return typeof rawVal === 'number' && rawVal > f.value;
+            case 'lte':
+              return typeof rawVal === 'number' && rawVal <= f.value;
+            case 'lt':
+              return typeof rawVal === 'number' && rawVal < f.value;
+            case 'between': {
+              if (typeof rawVal !== 'number') return false;
+              const [min, max] = f.value as [number, number];
+              return rawVal >= min && rawVal <= max;
+            }
+            case 'in': {
+              const arr = Array.isArray(f.value) ? f.value : [f.value];
+              if (arr.length === 0) return true;
+              if (Array.isArray(rawVal)) {
+                return rawVal.some((item) => arr.includes(item));
+              }
+              return arr.includes(rawVal);
+            }
+            default:
+              return true;
+          }
+        },
+      });
+    }
+  } else {
+    // Handle Record<string, FilterValue>
+    for (const [field, val] of Object.entries(filters)) {
+      if (val === null || val === undefined || val === '') continue;
+
+      // 1. Boolean Watchlist
+      if (field === 'watchlistOnly') {
+        if (val === true) {
+          predicates.push({
+            field,
+            type: 'boolean',
+            evalFn: (stock) => (watchlistSet ? watchlistSet.has(stock.symbol) : false),
+          });
+        }
+        continue;
+      }
+
+      // 2. Numerical Range
+      if (NUMERICAL_FIELDS.has(field)) {
+        if (field === 'priceVsSma50') {
+          if (val === 'Above') {
+            predicates.push({
+              field,
+              type: 'range',
+              evalFn: (stock) => stock.lastPrice > stock.sma50,
+            });
+          } else if (val === 'Below') {
+            predicates.push({
+              field,
+              type: 'range',
+              evalFn: (stock) => stock.lastPrice <= stock.sma50,
+            });
+          }
+          continue;
+        }
+
+        if (field === 'priceVsSma200') {
+          if (val === 'Above') {
+            predicates.push({
+              field,
+              type: 'range',
+              evalFn: (stock) => stock.lastPrice > stock.sma200,
+            });
+          } else if (val === 'Below') {
+            predicates.push({
+              field,
+              type: 'range',
+              evalFn: (stock) => stock.lastPrice <= stock.sma200,
+            });
+          }
+          continue;
+        }
+
+        // Standard numerical bounds
+        let minVal: number | null = null;
+        let maxVal: number | null = null;
+
+        if (Array.isArray(val) && val.length === 2) {
+          minVal = typeof val[0] === 'number' ? val[0] : null;
+          maxVal = typeof val[1] === 'number' ? val[1] : null;
+        } else if (typeof val === 'object' && !Array.isArray(val)) {
+          const obj = val as { min?: number | null; max?: number | null };
+          minVal = typeof obj.min === 'number' && !isNaN(obj.min) ? obj.min : null;
+          maxVal = typeof obj.max === 'number' && !isNaN(obj.max) ? obj.max : null;
+        } else if (typeof val === 'number') {
+          minVal = val;
+        }
+
+        if (minVal !== null || maxVal !== null) {
+          predicates.push({
+            field,
+            type: 'range',
+            evalFn: (stock) => {
+              const num = stock[field as keyof Stock];
+              if (typeof num !== 'number') return false;
+              if (minVal !== null && num < minVal) return false;
+              if (maxVal !== null && num > maxVal) return false;
+              return true;
+            },
+          });
+        }
+        continue;
+      }
+
+      // 3. Single-Select
+      if (SINGLE_SELECT_FIELDS.has(field)) {
+        if (typeof val === 'string') {
+          predicates.push({
+            field,
+            type: 'single',
+            evalFn: (stock) => stock[field as keyof Stock] === val,
+          });
+        }
+        continue;
+      }
+
+      // 4. Multi-Select Categorical
+      if (CATEGORICAL_FIELDS.has(field)) {
+        const arr = Array.isArray(val) ? val : [val];
+        if (arr.length > 0) {
+          predicates.push({
+            field,
+            type: 'multi',
+            evalFn: (stock) => {
+              const raw = stock[field as keyof Stock];
+              if (Array.isArray(raw)) {
+                return raw.some((item) => arr.includes(item));
+              }
+              return arr.includes(raw);
+            },
+          });
+        }
+        continue;
+      }
+    }
+  }
+
+  // Re-order predicates by selectivity:
+  // 1. Numerical range filters first (fastest & eliminates most records)
+  // 2. Single-select (fast equality)
+  // 3. Boolean watchlist
+  // 4. Multi-select (array lookups) last
+  return predicates.sort((a, b) => {
+    const priority = { range: 1, single: 2, boolean: 3, legacy: 4, multi: 5 };
+    return priority[a.type] - priority[b.type];
+  });
+}
+
+/**
+ * High-Performance Combinatorial Filter Engine (<200ms for 5,000+ items)
  */
 export function executeFilterEngine(
   stocks: Stock[],
-  filters: FilterConfig[],
+  filters: ActiveFiltersState | FilterConfig[],
   sortConfig: SortConfig | null = null,
-  watchlist?: Set<string>
+  watchlist?: Set<string> | string[]
 ): FilterResult {
   const start = performance.now();
 
-  const enabledFilters = filters.filter((f) => f.enabled);
+  const watchlistSet =
+    watchlist instanceof Set ? watchlist : watchlist ? new Set(watchlist) : undefined;
 
-  // If no filters enabled and no sort, fast return
-  if (enabledFilters.length === 0 && !sortConfig) {
-    return {
-      filtered: stocks,
-      executionTimeMs: Number((performance.now() - start).toFixed(2)),
-    };
-  }
+  const predicates = compileFilters(filters, watchlistSet);
 
-  // Predicate sorting: sort most restrictive / numeric filters first
-  const sortedFilters = [...enabledFilters].sort((a, b) => {
-    const precA = OPERATOR_PRECEDENCE[a.operator] ?? 99;
-    const precB = OPERATOR_PRECEDENCE[b.operator] ?? 99;
-    return precA - precB;
-  });
+  let filtered: Stock[];
 
-  const filterCount = sortedFilters.length;
-  const filtered: Stock[] = [];
+  if (predicates.length === 0) {
+    filtered = [...stocks];
+  } else {
+    filtered = [];
+    const predCount = predicates.length;
 
-  // Single-pass short-circuit evaluation
-  for (let i = 0; i < stocks.length; i++) {
-    const stock = stocks[i];
-    let matches = true;
+    // Single pass with short-circuit evaluation
+    for (let i = 0; i < stocks.length; i++) {
+      const stock = stocks[i];
+      let match = true;
 
-    for (let f = 0; f < filterCount; f++) {
-      if (!evaluatePredicate(stock, sortedFilters[f], watchlist)) {
-        matches = false;
-        break; // Short-circuit immediately
+      for (let p = 0; p < predCount; p++) {
+        if (!predicates[p].evalFn(stock, watchlistSet)) {
+          match = false;
+          break; // Short-circuit
+        }
+      }
+
+      if (match) {
+        filtered.push(stock);
       }
     }
-
-    if (matches) {
-      filtered.push(stock);
-    }
   }
 
-  // Sorting
+  // Apply sorting
   if (sortConfig) {
     const { column, direction } = sortConfig;
     const modifier = direction === 'asc' ? 1 : -1;
@@ -150,9 +302,14 @@ export function executeFilterEngine(
   }
 
   const end = performance.now();
+  const executionTimeMs = Number((end - start).toFixed(2));
 
   return {
-    filtered,
-    executionTimeMs: Number((end - start).toFixed(2)),
+    filteredStocks: filtered,
+    filtered, // Alias
+    executionTimeMs,
   };
 }
+
+// Export default alias
+export const filterStocks = executeFilterEngine;

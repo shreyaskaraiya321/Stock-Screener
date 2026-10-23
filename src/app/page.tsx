@@ -5,11 +5,10 @@ import { useStockStore } from '@/stores/useStockStore';
 import { useRealtimePrices } from '@/hooks/useRealtimePrices';
 import { ScreenerTable } from '@/components/DataGrid/ScreenerTable';
 import { FilterSidebar } from '@/components/FilterPanel/FilterSidebar';
-import { ActiveFiltersBar } from '@/components/FilterPanel/ActiveFiltersBar';
+import { ActiveFilterChips } from '@/components/FilterPanel/ActiveFilterChips';
 import { StockChartModal } from '@/components/StockChart/StockChartModal';
 import {
   TrendingUp,
-  Activity,
   SlidersHorizontal,
   Bookmark,
   Download,
@@ -23,8 +22,9 @@ export default function StockScreenerPage() {
   const filteredStocks = useStockStore((s) => s.filteredStocks);
   const watchlist = useStockStore((s) => s.watchlist);
   const setSelectedSymbol = useStockStore((s) => s.setSelectedSymbol);
+  const isFilterOpen = useStockStore((s) => s.isFilterOpen);
+  const toggleFilterPanel = useStockStore((s) => s.toggleFilterPanel);
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -99,10 +99,10 @@ export default function StockScreenerPage() {
       <header className="h-16 shrink-0 flex items-center justify-between px-4 bg-[#080d1a] border-b border-slate-800 shadow-lg z-30">
         <div className="flex items-center space-x-3">
           <button
-            onClick={() => setIsSidebarOpen((prev) => !prev)}
+            onClick={toggleFilterPanel}
             className={`p-2 rounded-lg border transition-colors ${
-              isSidebarOpen
-                ? 'bg-indigo-600 border-indigo-500 text-white'
+              isFilterOpen
+                ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
                 : 'bg-surface-elevated border-slate-800 text-slate-300 hover:text-white'
             }`}
             title="Toggle Filter Sidebar"
@@ -235,18 +235,15 @@ export default function StockScreenerPage() {
         </div>
       </header>
 
-      {/* Main Viewport: h-[calc(100vh-64px)] overflow-hidden */}
+      {/* Main Viewport: h-[calc(100vh-64px)] overflow-hidden with FilterSidebar on left and Table on right */}
       <main className="h-[calc(100vh-64px)] w-full flex overflow-hidden relative">
-        {/* Collapsible Filter Sidebar */}
-        <FilterSidebar
-          isOpen={isSidebarOpen}
-          onToggle={() => setIsSidebarOpen((prev) => !prev)}
-        />
+        {/* Collapsible 320px Filter Sidebar */}
+        <FilterSidebar />
 
         {/* Data Grid Section */}
         <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#090d16]">
-          {/* Active Filter Chips */}
-          <ActiveFiltersBar />
+          {/* Active Filter Tag Chips */}
+          <ActiveFilterChips />
 
           {/* Virtual Table */}
           <div className="flex-1 overflow-hidden">

@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useStockStore } from '@/stores/useStockStore';
-import { FILTER_PRESETS, FilterPreset } from '@/lib/filterPresets';
+import { FILTER_PRESETS } from '@/lib/filterPresets';
+import { RangeFilter } from './RangeFilter';
+import { MultiSelectFilter } from './MultiSelectFilter';
 import { Sector, MarketCapCategory, MACDSignal, BollingerPosition, VolumeVsAvg } from '@/types/stock';
 import {
   ChevronDown,
@@ -10,10 +12,9 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Sparkles,
-  Search,
   Bookmark,
   Check,
-  X,
+  Zap,
 } from 'lucide-react';
 
 const SECTORS: Sector[] = [
@@ -34,139 +35,52 @@ const SECTORS: Sector[] = [
 const MCAP_CATEGORIES: MarketCapCategory[] = ['Large Cap', 'Mid Cap', 'Small Cap', 'Micro Cap'];
 const INDICES = ['NIFTY 50', 'NIFTY NEXT 50', 'NIFTY MIDCAP 150', 'NIFTY SMALLCAP 250', 'NIFTY 500'];
 
-export const FilterSidebar: React.FC<{ isOpen: boolean; onToggle: () => void }> = ({
-  isOpen,
-  onToggle,
-}) => {
+export const FilterSidebar: React.FC = () => {
   const stocks = useStockStore((s) => s.stocks);
   const filteredStocks = useStockStore((s) => s.filteredStocks);
   const activeFilters = useStockStore((s) => s.activeFilters);
-  const setFilter = useStockStore((s) => s.setFilter);
+  const updateFilter = useStockStore((s) => s.updateFilter);
   const removeFilter = useStockStore((s) => s.removeFilter);
-  const clearFilters = useStockStore((s) => s.clearFilters);
+  const clearAllFilters = useStockStore((s) => s.clearAllFilters);
   const applyPreset = useStockStore((s) => s.applyPreset);
   const filterExecutionTimeMs = useStockStore((s) => s.filterExecutionTimeMs);
+  const isFilterOpen = useStockStore((s) => s.isFilterOpen);
+  const toggleFilterPanel = useStockStore((s) => s.toggleFilterPanel);
 
   // Accordion state
   const [sections, setSections] = useState({
     presets: true,
-    marketData: true,
     valuation: true,
-    fundamentals: true,
     technicals: true,
+    classification: true,
   });
 
   const toggleSection = (key: keyof typeof sections) => {
     setSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Debounced filter dispatch helper
-  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
-  const dispatchDebounced = useCallback(
-    (fn: () => void) => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      const timer = setTimeout(fn, 250);
-      setDebounceTimer(timer);
-    },
-    [debounceTimer]
-  );
-
-  // Helper to check filter active value
-  const getFilter = (id: string) => activeFilters.find((f) => f.id === id);
-
-  // Sector Multi-Select handler
-  const activeSectorsFilter = getFilter('sector-in');
-  const activeSectors: Sector[] = activeSectorsFilter?.value || [];
-
-  const handleToggleSector = (sec: Sector) => {
-    let next: Sector[];
-    if (activeSectors.includes(sec)) {
-      next = activeSectors.filter((s) => s !== sec);
-    } else {
-      next = [...activeSectors, sec];
-    }
-    if (next.length === 0) {
-      removeFilter('sector-in');
-    } else {
-      setFilter({
-        id: 'sector-in',
-        field: 'sector',
-        operator: 'in',
-        value: next,
-        enabled: true,
-      });
-    }
-  };
-
-  // Market Cap Category Multi-Select
-  const activeMcapCatFilter = getFilter('mcap-cat-in');
-  const activeMcapCats: MarketCapCategory[] = activeMcapCatFilter?.value || [];
-
-  const handleToggleMcapCat = (cat: MarketCapCategory) => {
-    let next: MarketCapCategory[];
-    if (activeMcapCats.includes(cat)) {
-      next = activeMcapCats.filter((c) => c !== cat);
-    } else {
-      next = [...activeMcapCats, cat];
-    }
-    if (next.length === 0) {
-      removeFilter('mcap-cat-in');
-    } else {
-      setFilter({
-        id: 'mcap-cat-in',
-        field: 'marketCapCategory',
-        operator: 'in',
-        value: next,
-        enabled: true,
-      });
-    }
-  };
-
-  // Index Membership
-  const activeIndexFilter = getFilter('index-in');
-  const activeIndices: string[] = activeIndexFilter?.value || [];
-
-  const handleToggleIndex = (idxName: string) => {
-    let next: string[];
-    if (activeIndices.includes(idxName)) {
-      next = activeIndices.filter((x) => x !== idxName);
-    } else {
-      next = [...activeIndices, idxName];
-    }
-    if (next.length === 0) {
-      removeFilter('index-in');
-    } else {
-      setFilter({
-        id: 'index-in',
-        field: 'indexMembership',
-        operator: 'in',
-        value: next,
-        enabled: true,
-      });
-    }
-  };
-
-  // Watchlist only
-  const isWatchlistOnly = getFilter('watchlist-only')?.enabled || false;
+  const hasActiveFilters = Object.keys(activeFilters).length > 0;
 
   return (
     <aside
-      className={`relative z-20 flex flex-col h-full bg-[#0a0f1d] border-r border-slate-800 transition-all duration-300 ease-in-out shrink-0 ${
-        isOpen ? 'w-[320px]' : 'w-0 overflow-hidden'
+      className={`relative z-20 flex flex-col h-full bg-[#0a0f1d] border-r border-slate-800 transition-all duration-300 ease-in-out shrink-0 select-none ${
+        isFilterOpen ? 'w-[320px]' : 'w-0 overflow-hidden border-r-0'
       }`}
     >
       {/* Sidebar Header */}
-      <div className="flex items-center justify-between p-3.5 border-b border-slate-800 bg-[#0f172a]">
+      <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-[#0f172a]">
         <div className="flex items-center space-x-2">
           <SlidersHorizontal className="w-4 h-4 text-indigo-400" />
-          <h2 className="text-sm font-semibold text-slate-100 tracking-wide">Filters & Screener</h2>
+          <h2 className="text-sm font-semibold text-slate-100 tracking-wide font-sans">
+            Filters & Screener
+          </h2>
         </div>
         <div className="flex items-center space-x-1">
-          {activeFilters.length > 0 && (
+          {hasActiveFilters && (
             <button
-              onClick={clearFilters}
+              onClick={clearAllFilters}
               title="Reset all filters"
-              className="flex items-center space-x-1 px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-rose-400 bg-slate-800 hover:bg-slate-700/60 rounded transition-colors"
+              className="flex items-center space-x-1 px-2 py-0.5 text-[11px] font-medium text-slate-400 hover:text-rose-400 bg-slate-800 hover:bg-slate-700/60 rounded transition-colors"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Reset</span>
@@ -175,45 +89,40 @@ export const FilterSidebar: React.FC<{ isOpen: boolean; onToggle: () => void }> 
         </div>
       </div>
 
-      {/* Benchmark Counter Banner */}
+      {/* Header Counter with Performance Instrumentation */}
       <div className="px-3.5 py-2 bg-indigo-950/30 border-b border-indigo-900/40 flex items-center justify-between text-xs">
-        <span className="text-slate-300 font-medium">
-          Showing <strong className="text-indigo-300">{filteredStocks.length.toLocaleString('en-IN')}</strong> of {stocks.length.toLocaleString('en-IN')}
+        <span className="text-slate-300 font-medium text-[11px]">
+          Showing <strong className="text-indigo-300">{filteredStocks.length.toLocaleString('en-IN')}</strong> of {stocks.length.toLocaleString('en-IN')} stocks
         </span>
-        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/50">
-          ⚡ {filterExecutionTimeMs} ms
+        <span className="flex items-center space-x-1 text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/50">
+          <Zap className="w-2.5 h-2.5" />
+          <span>{filterExecutionTimeMs}ms</span>
         </span>
       </div>
 
       {/* Scrollable Filter List */}
-      <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-4 custom-scrollbar text-xs">
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3.5 custom-scrollbar text-xs">
         {/* Watchlist Toggle */}
         <div className="p-2.5 rounded-lg bg-surface-elevated/70 border border-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Bookmark className="w-4 h-4 text-amber-400" />
-            <span className="text-slate-200 font-medium">My Watchlist Only</span>
+            <span className="text-slate-200 font-medium text-xs">My Watchlist Only</span>
           </div>
           <input
             type="checkbox"
-            checked={isWatchlistOnly}
+            checked={!!activeFilters.watchlistOnly}
             onChange={(e) => {
               if (e.target.checked) {
-                setFilter({
-                  id: 'watchlist-only',
-                  field: 'symbol',
-                  operator: 'eq',
-                  value: true,
-                  enabled: true,
-                });
+                updateFilter('watchlistOnly', true);
               } else {
-                removeFilter('watchlist-only');
+                removeFilter('watchlistOnly');
               }
             }}
             className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
           />
         </div>
 
-        {/* Section: Presets */}
+        {/* Section 1: Quick Presets */}
         <div className="border border-slate-800/80 rounded-lg overflow-hidden bg-slate-900/40">
           <button
             onClick={() => toggleSection('presets')}
@@ -225,13 +134,14 @@ export const FilterSidebar: React.FC<{ isOpen: boolean; onToggle: () => void }> 
             </div>
             {sections.presets ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
           </button>
+
           {sections.presets && (
             <div className="p-2.5 space-y-1.5">
               {FILTER_PRESETS.map((preset) => (
                 <button
                   key={preset.id}
                   onClick={() => applyPreset(preset)}
-                  className="w-full text-left p-2 rounded bg-surface-elevated/50 hover:bg-indigo-950/40 border border-slate-800 hover:border-indigo-500/40 transition-all group"
+                  className="w-full text-left p-2 rounded bg-surface-elevated/50 hover:bg-indigo-950/50 border border-slate-800 hover:border-indigo-500/40 transition-all group"
                 >
                   <div className="flex items-center justify-between mb-0.5">
                     <span className="font-semibold text-slate-200 group-hover:text-indigo-300">
@@ -248,442 +158,157 @@ export const FilterSidebar: React.FC<{ isOpen: boolean; onToggle: () => void }> 
           )}
         </div>
 
-        {/* Section: Market Data & Indices */}
-        <div className="border border-slate-800/80 rounded-lg overflow-hidden bg-slate-900/40">
-          <button
-            onClick={() => toggleSection('marketData')}
-            className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/50 hover:bg-slate-800/80 text-slate-200 font-medium transition-colors"
-          >
-            <span>Market Data & Indices</span>
-            {sections.marketData ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
-          </button>
-          {sections.marketData && (
-            <div className="p-2.5 space-y-3">
-              {/* Market Cap Category */}
-              <div>
-                <label className="text-[11px] font-medium text-slate-400 mb-1.5 block">Market Cap Tier</label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {MCAP_CATEGORIES.map((cat) => {
-                    const isSelected = activeMcapCats.includes(cat);
-                    return (
-                      <button
-                        key={cat}
-                        onClick={() => handleToggleMcapCat(cat)}
-                        className={`px-2 py-1 rounded text-[11px] text-center font-medium border transition-colors ${
-                          isSelected
-                            ? 'bg-indigo-600 border-indigo-400 text-white'
-                            : 'bg-surface-elevated border-slate-800 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Indices */}
-              <div>
-                <label className="text-[11px] font-medium text-slate-400 mb-1.5 block">Key Indices</label>
-                <div className="flex flex-wrap gap-1">
-                  {INDICES.map((idxName) => {
-                    const isSelected = activeIndices.includes(idxName);
-                    return (
-                      <button
-                        key={idxName}
-                        onClick={() => handleToggleIndex(idxName)}
-                        className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
-                          isSelected
-                            ? 'bg-indigo-600 border-indigo-400 text-white'
-                            : 'bg-slate-800 border-slate-700/60 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        {idxName}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Sectors */}
-              <div>
-                <label className="text-[11px] font-medium text-slate-400 mb-1.5 block">Sectors</label>
-                <div className="flex flex-wrap gap-1 max-h-36 overflow-y-auto pr-1">
-                  {SECTORS.map((sec) => {
-                    const isSelected = activeSectors.includes(sec);
-                    return (
-                      <button
-                        key={sec}
-                        onClick={() => handleToggleSector(sec)}
-                        className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${
-                          isSelected
-                            ? 'bg-indigo-600 border-indigo-400 text-white'
-                            : 'bg-surface-elevated border-slate-800 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        {sec}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Section: Valuation */}
+        {/* Section 2: Valuation & Fundamentals */}
         <div className="border border-slate-800/80 rounded-lg overflow-hidden bg-slate-900/40">
           <button
             onClick={() => toggleSection('valuation')}
             className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/50 hover:bg-slate-800/80 text-slate-200 font-medium transition-colors"
           >
-            <span>Valuation</span>
+            <span>Valuation & Fundamentals</span>
             {sections.valuation ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
           </button>
+
           {sections.valuation && (
             <div className="p-2.5 space-y-3">
-              {/* P/E Ratio Slider */}
-              <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>P/E Ratio Max</span>
-                  <span className="text-slate-200 font-mono">
-                    {getFilter('val-pe-max')?.value ?? 'Any'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="5"
-                  max="100"
-                  step="5"
-                  defaultValue="100"
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    dispatchDebounced(() => {
-                      if (val >= 100) {
-                        removeFilter('val-pe-max');
-                      } else {
-                        setFilter({
-                          id: 'val-pe-max',
-                          field: 'pe',
-                          operator: 'lte',
-                          value: val,
-                          enabled: true,
-                        });
-                      }
-                    });
-                  }}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
+              <RangeFilter
+                label="Market Cap (Cr)"
+                field="marketCap"
+                unit="₹ Cr"
+                value={activeFilters.marketCap as any}
+                onChange={(v) => updateFilter('marketCap', v)}
+                minPlaceholder="50"
+                maxPlaceholder="2000000"
+              />
 
-              {/* P/B Ratio Max */}
-              <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>P/B Ratio Max</span>
-                  <span className="text-slate-200 font-mono">
-                    {getFilter('val-pb-max')?.value ?? 'Any'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="20"
-                  step="0.5"
-                  defaultValue="20"
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    dispatchDebounced(() => {
-                      if (val >= 20) {
-                        removeFilter('val-pb-max');
-                      } else {
-                        setFilter({
-                          id: 'val-pb-max',
-                          field: 'pb',
-                          operator: 'lte',
-                          value: val,
-                          enabled: true,
-                        });
-                      }
-                    });
-                  }}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
+              <RangeFilter
+                label="P/E Ratio"
+                field="pe"
+                value={activeFilters.pe as any}
+                onChange={(v) => updateFilter('pe', v)}
+                minPlaceholder="0"
+                maxPlaceholder="100"
+                step={0.5}
+              />
 
-              {/* Dividend Yield Min */}
-              <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>Dividend Yield Min %</span>
-                  <span className="text-slate-200 font-mono">
-                    {getFilter('val-div-min')?.value ? `${getFilter('val-div-min')?.value}%` : '0%'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="6"
-                  step="0.5"
-                  defaultValue="0"
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    dispatchDebounced(() => {
-                      if (val <= 0) {
-                        removeFilter('val-div-min');
-                      } else {
-                        setFilter({
-                          id: 'val-div-min',
-                          field: 'dividendYield',
-                          operator: 'gte',
-                          value: val,
-                          enabled: true,
-                        });
-                      }
-                    });
-                  }}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
+              <RangeFilter
+                label="P/B Ratio"
+                field="pb"
+                value={activeFilters.pb as any}
+                onChange={(v) => updateFilter('pb', v)}
+                minPlaceholder="0"
+                maxPlaceholder="25"
+                step={0.1}
+              />
+
+              <RangeFilter
+                label="ROE (%)"
+                field="roe"
+                unit="%"
+                value={activeFilters.roe as any}
+                onChange={(v) => updateFilter('roe', v)}
+                minPlaceholder="0"
+                maxPlaceholder="60"
+              />
+
+              <RangeFilter
+                label="ROCE (%)"
+                field="roce"
+                unit="%"
+                value={activeFilters.roce as any}
+                onChange={(v) => updateFilter('roce', v)}
+                minPlaceholder="0"
+                maxPlaceholder="60"
+              />
+
+              <RangeFilter
+                label="Debt to Equity"
+                field="debtToEquity"
+                unit="x"
+                value={activeFilters.debtToEquity as any}
+                onChange={(v) => updateFilter('debtToEquity', v)}
+                minPlaceholder="0"
+                maxPlaceholder="15"
+                step={0.1}
+              />
+
+              <RangeFilter
+                label="Dividend Yield"
+                field="dividendYield"
+                unit="%"
+                value={activeFilters.dividendYield as any}
+                onChange={(v) => updateFilter('dividendYield', v)}
+                minPlaceholder="0"
+                maxPlaceholder="8"
+                step={0.2}
+              />
+
+              <RangeFilter
+                label="Promoter Holding"
+                field="promoterHolding"
+                unit="%"
+                value={activeFilters.promoterHolding as any}
+                onChange={(v) => updateFilter('promoterHolding', v)}
+                minPlaceholder="0"
+                maxPlaceholder="75"
+              />
+
+              <RangeFilter
+                label="Revenue Growth YoY"
+                field="revenueGrowthYoY"
+                unit="%"
+                value={activeFilters.revenueGrowthYoY as any}
+                onChange={(v) => updateFilter('revenueGrowthYoY', v)}
+                minPlaceholder="-10"
+                maxPlaceholder="60"
+              />
+
+              <RangeFilter
+                label="Profit Growth YoY"
+                field="profitGrowthYoY"
+                unit="%"
+                value={activeFilters.profitGrowthYoY as any}
+                onChange={(v) => updateFilter('profitGrowthYoY', v)}
+                minPlaceholder="-10"
+                maxPlaceholder="80"
+              />
             </div>
           )}
         </div>
 
-        {/* Section: Fundamentals */}
-        <div className="border border-slate-800/80 rounded-lg overflow-hidden bg-slate-900/40">
-          <button
-            onClick={() => toggleSection('fundamentals')}
-            className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/50 hover:bg-slate-800/80 text-slate-200 font-medium transition-colors"
-          >
-            <span>Fundamentals</span>
-            {sections.fundamentals ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
-          </button>
-          {sections.fundamentals && (
-            <div className="p-2.5 space-y-3">
-              {/* ROE Min */}
-              <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>ROE Min %</span>
-                  <span className="text-slate-200 font-mono">
-                    {getFilter('fund-roe-min')?.value ? `${getFilter('fund-roe-min')?.value}%` : '0%'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="35"
-                  step="2"
-                  defaultValue="0"
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    dispatchDebounced(() => {
-                      if (val <= 0) {
-                        removeFilter('fund-roe-min');
-                      } else {
-                        setFilter({
-                          id: 'fund-roe-min',
-                          field: 'roe',
-                          operator: 'gte',
-                          value: val,
-                          enabled: true,
-                        });
-                      }
-                    });
-                  }}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
-
-              {/* ROCE Min */}
-              <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>ROCE Min %</span>
-                  <span className="text-slate-200 font-mono">
-                    {getFilter('fund-roce-min')?.value ? `${getFilter('fund-roce-min')?.value}%` : '0%'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="35"
-                  step="2"
-                  defaultValue="0"
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    dispatchDebounced(() => {
-                      if (val <= 0) {
-                        removeFilter('fund-roce-min');
-                      } else {
-                        setFilter({
-                          id: 'fund-roce-min',
-                          field: 'roce',
-                          operator: 'gte',
-                          value: val,
-                          enabled: true,
-                        });
-                      }
-                    });
-                  }}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
-
-              {/* Debt to Equity Max */}
-              <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>Debt/Equity Max</span>
-                  <span className="text-slate-200 font-mono">
-                    {getFilter('fund-de-max')?.value ?? 'Any'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="5"
-                  step="0.25"
-                  defaultValue="5"
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    dispatchDebounced(() => {
-                      if (val >= 5) {
-                        removeFilter('fund-de-max');
-                      } else {
-                        setFilter({
-                          id: 'fund-de-max',
-                          field: 'debtToEquity',
-                          operator: 'lte',
-                          value: val,
-                          enabled: true,
-                        });
-                      }
-                    });
-                  }}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
-
-              {/* Promoter Holding Min */}
-              <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>Promoter Holding Min %</span>
-                  <span className="text-slate-200 font-mono">
-                    {getFilter('fund-prom-min')?.value ? `${getFilter('fund-prom-min')?.value}%` : '0%'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="75"
-                  step="5"
-                  defaultValue="0"
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    dispatchDebounced(() => {
-                      if (val <= 0) {
-                        removeFilter('fund-prom-min');
-                      } else {
-                        setFilter({
-                          id: 'fund-prom-min',
-                          field: 'promoterHolding',
-                          operator: 'gte',
-                          value: val,
-                          enabled: true,
-                        });
-                      }
-                    });
-                  }}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Section: Technical Indicators */}
+        {/* Section 3: Technicals & Momentum */}
         <div className="border border-slate-800/80 rounded-lg overflow-hidden bg-slate-900/40">
           <button
             onClick={() => toggleSection('technicals')}
             className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/50 hover:bg-slate-800/80 text-slate-200 font-medium transition-colors"
           >
-            <span>Technical Indicators</span>
+            <span>Technicals & Momentum</span>
             {sections.technicals ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
           </button>
+
           {sections.technicals && (
             <div className="p-2.5 space-y-3">
-              {/* RSI(14) Range */}
-              <div>
-                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>RSI(14) Filter</span>
-                  <span className="text-slate-200 font-mono">
-                    {getFilter('tech-rsi-ovb')?.value
-                      ? 'Overbought (>70)'
-                      : getFilter('tech-rsi-ovs')?.value
-                      ? 'Oversold (<30)'
-                      : 'All'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-1">
-                  <button
-                    onClick={() => {
-                      removeFilter('tech-rsi-ovb');
-                      removeFilter('tech-rsi-ovs');
-                    }}
-                    className="px-2 py-1 rounded text-[10px] bg-surface-elevated text-slate-400 hover:text-white border border-slate-800"
-                  >
-                    All
-                  </button>
-                  <button
-                    onClick={() => {
-                      removeFilter('tech-rsi-ovb');
-                      setFilter({
-                        id: 'tech-rsi-ovs',
-                        field: 'rsi14',
-                        operator: 'lte',
-                        value: 30,
-                        enabled: true,
-                      });
-                    }}
-                    className="px-2 py-1 rounded text-[10px] bg-emerald-950/60 text-emerald-400 hover:bg-emerald-900/80 border border-emerald-800/60"
-                  >
-                    &lt; 30
-                  </button>
-                  <button
-                    onClick={() => {
-                      removeFilter('tech-rsi-ovs');
-                      setFilter({
-                        id: 'tech-rsi-ovb',
-                        field: 'rsi14',
-                        operator: 'gte',
-                        value: 70,
-                        enabled: true,
-                      });
-                    }}
-                    className="px-2 py-1 rounded text-[10px] bg-rose-950/60 text-rose-400 hover:bg-rose-900/80 border border-rose-800/60"
-                  >
-                    &gt; 70
-                  </button>
-                </div>
-              </div>
+              <RangeFilter
+                label="RSI (14)"
+                field="rsi14"
+                value={activeFilters.rsi14 as any}
+                onChange={(v) => updateFilter('rsi14', v)}
+                minPlaceholder="0"
+                maxPlaceholder="100"
+              />
 
               {/* MACD Signal */}
               <div>
                 <label className="text-[11px] font-medium text-slate-400 mb-1 block">MACD Signal</label>
                 <div className="grid grid-cols-3 gap-1">
                   {(['Bullish', 'Bearish', 'Neutral'] as MACDSignal[]).map((sig) => {
-                    const active = getFilter('tech-macd')?.value === sig;
+                    const active = activeFilters.macdSignal === sig;
                     return (
                       <button
                         key={sig}
+                        type="button"
                         onClick={() => {
-                          if (active) {
-                            removeFilter('tech-macd');
-                          } else {
-                            setFilter({
-                              id: 'tech-macd',
-                              field: 'macdSignal',
-                              operator: 'eq',
-                              value: sig,
-                              enabled: true,
-                            });
-                          }
+                          if (active) removeFilter('macdSignal');
+                          else updateFilter('macdSignal', sig);
                         }}
                         className={`px-1.5 py-1 rounded text-[10px] font-medium border text-center transition-colors ${
                           active
@@ -702,83 +327,19 @@ export const FilterSidebar: React.FC<{ isOpen: boolean; onToggle: () => void }> 
                 </div>
               </div>
 
-              {/* Price vs SMA 50 & SMA 200 */}
+              {/* Price vs SMA 50 */}
               <div>
-                <label className="text-[11px] font-medium text-slate-400 mb-1 block">Moving Averages</label>
-                <div className="space-y-1">
-                  <button
-                    onClick={() => {
-                      const cur = getFilter('tech-sma50')?.value;
-                      if (cur === 'Above') {
-                        removeFilter('tech-sma50');
-                      } else {
-                        setFilter({
-                          id: 'tech-sma50',
-                          field: 'priceVsSma50' as any,
-                          operator: 'eq',
-                          value: 'Above',
-                          enabled: true,
-                        });
-                      }
-                    }}
-                    className={`w-full text-left px-2 py-1 rounded text-[11px] border transition-colors flex justify-between items-center ${
-                      getFilter('tech-sma50')?.value === 'Above'
-                        ? 'bg-indigo-950/60 border-indigo-500 text-indigo-300'
-                        : 'bg-surface-elevated border-slate-800 text-slate-400'
-                    }`}
-                  >
-                    <span>Price &gt; 50 SMA</span>
-                    {getFilter('tech-sma50')?.value === 'Above' && <Check className="w-3 h-3 text-indigo-400" />}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      const cur = getFilter('tech-sma200')?.value;
-                      if (cur === 'Above') {
-                        removeFilter('tech-sma200');
-                      } else {
-                        setFilter({
-                          id: 'tech-sma200',
-                          field: 'priceVsSma200' as any,
-                          operator: 'eq',
-                          value: 'Above',
-                          enabled: true,
-                        });
-                      }
-                    }}
-                    className={`w-full text-left px-2 py-1 rounded text-[11px] border transition-colors flex justify-between items-center ${
-                      getFilter('tech-sma200')?.value === 'Above'
-                        ? 'bg-indigo-950/60 border-indigo-500 text-indigo-300'
-                        : 'bg-surface-elevated border-slate-800 text-slate-400'
-                    }`}
-                  >
-                    <span>Price &gt; 200 SMA (Golden)</span>
-                    {getFilter('tech-sma200')?.value === 'Above' && <Check className="w-3 h-3 text-indigo-400" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Volume Spike vs 20D Avg */}
-              <div>
-                <label className="text-[11px] font-medium text-slate-400 mb-1 block">Volume Spike (vs 20D Avg)</label>
+                <label className="text-[11px] font-medium text-slate-400 mb-1 block">Price vs SMA 50</label>
                 <div className="grid grid-cols-2 gap-1">
-                  {['Above', '2x', '3x'].map((volTier) => {
-                    const active = getFilter('tech-vol-spike')?.value === volTier;
+                  {['Above', 'Below'].map((pos) => {
+                    const active = activeFilters.priceVsSma50 === pos;
                     return (
                       <button
-                        key={volTier}
+                        key={pos}
+                        type="button"
                         onClick={() => {
-                          if (active) {
-                            removeFilter('tech-vol-spike');
-                          } else {
-                            setFilter({
-                              id: 'tech-vol-spike',
-                              field: 'volumeVsAvg',
-                              operator: 'eq',
-                              value: volTier,
-                              enabled: true,
-                            });
-                          }
+                          if (active) removeFilter('priceVsSma50');
+                          else updateFilter('priceVsSma50', pos);
                         }}
                         className={`px-2 py-1 rounded text-[10px] font-medium border text-center transition-colors ${
                           active
@@ -786,12 +347,77 @@ export const FilterSidebar: React.FC<{ isOpen: boolean; onToggle: () => void }> 
                             : 'bg-surface-elevated border-slate-800 text-slate-400 hover:text-slate-200'
                         }`}
                       >
-                        {volTier === 'Above' ? 'Above Avg' : `${volTier} Volume`}
+                        {pos}
                       </button>
                     );
                   })}
                 </div>
               </div>
+
+              {/* Volume vs 20D Avg */}
+              <div>
+                <label className="text-[11px] font-medium text-slate-400 mb-1 block">Volume Spike (vs 20D Avg)</label>
+                <div className="grid grid-cols-2 gap-1">
+                  {['Above', '2x', '3x'].map((tier) => {
+                    const active = activeFilters.volumeVsAvg === tier;
+                    return (
+                      <button
+                        key={tier}
+                        type="button"
+                        onClick={() => {
+                          if (active) removeFilter('volumeVsAvg');
+                          else updateFilter('volumeVsAvg', tier);
+                        }}
+                        className={`px-2 py-1 rounded text-[10px] font-medium border text-center transition-colors ${
+                          active
+                            ? 'bg-indigo-600 border-indigo-400 text-white'
+                            : 'bg-surface-elevated border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {tier === 'Above' ? 'Above Avg' : `${tier} Vol`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Section 4: Classification */}
+        <div className="border border-slate-800/80 rounded-lg overflow-hidden bg-slate-900/40">
+          <button
+            onClick={() => toggleSection('classification')}
+            className="w-full flex items-center justify-between px-3 py-2 bg-slate-800/50 hover:bg-slate-800/80 text-slate-200 font-medium transition-colors"
+          >
+            <span>Classification</span>
+            {sections.classification ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+          </button>
+
+          {sections.classification && (
+            <div className="p-2.5 space-y-3">
+              <MultiSelectFilter
+                label="Sectors"
+                options={SECTORS}
+                selectedValues={(activeFilters.sector as string[]) || []}
+                onChange={(selected) => updateFilter('sector', selected)}
+              />
+
+              <MultiSelectFilter
+                label="Market Cap Category"
+                options={MCAP_CATEGORIES}
+                selectedValues={(activeFilters.marketCapCategory as string[]) || []}
+                onChange={(selected) => updateFilter('marketCapCategory', selected)}
+                searchable={false}
+              />
+
+              <MultiSelectFilter
+                label="Index Membership"
+                options={INDICES}
+                selectedValues={(activeFilters.indexMembership as string[]) || []}
+                onChange={(selected) => updateFilter('indexMembership', selected)}
+                searchable={false}
+              />
             </div>
           )}
         </div>

@@ -2,22 +2,23 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { persist } from 'zustand/middleware';
 import { enableMapSet } from 'immer';
-import { Stock, FilterConfig, SortConfig, PriceUpdate } from '@/types/stock';
+import { Stock, SortConfig, PriceUpdate } from '@/types/stock';
 import { generateMockStocks } from '@/lib/mockDataGenerator';
-import { executeFilterEngine } from '@/lib/filterEngine';
-import { FilterPreset } from '@/lib/filterPresets';
+import { executeFilterEngine, ActiveFiltersState } from '@/lib/filterEngine';
+import { FilterPreset, PRESET_MAP } from '@/lib/filterPresets';
 
 enableMapSet();
 
 export interface StockStoreState {
   stocks: Stock[];
   filteredStocks: Stock[];
-  activeFilters: FilterConfig[];
+  activeFilters: ActiveFiltersState;
+  filterExecutionTimeMs: number;
+  isFilterOpen: boolean;
   sortConfig: SortConfig;
   selectedSymbol: string | null;
   watchlist: string[];
   pinnedColumns: string[];
-  filterExecutionTimeMs: number;
   priceFlashes: Record<string, 'up' | 'down'>;
   isStreaming: boolean;
 
@@ -32,11 +33,13 @@ export interface StockStoreState {
   clearFlash: (symbol: string) => void;
   setStreaming: (isStreaming: boolean) => void;
 
-  // Filter actions
-  setFilter: (filter: FilterConfig) => void;
-  removeFilter: (filterId: string) => void;
-  clearFilters: () => void;
-  applyPreset: (preset: FilterPreset) => void;
+  // Filter Actions
+  updateFilter: (field: string, value: any) => void;
+  removeFilter: (field: string) => void;
+  clearAllFilters: () => void;
+  clearFilters: () => void; // Alias
+  applyPreset: (presetNameOrPreset: string | FilterPreset) => void;
+  toggleFilterPanel: () => void;
 }
 
 // Initial 5,000 stocks sorted by marketCap desc
@@ -47,26 +50,26 @@ export const useStockStore = create<StockStoreState>()(
     immer((set, get) => ({
       stocks: initialStocks,
       filteredStocks: initialStocks,
-      activeFilters: [],
+      activeFilters: {},
+      filterExecutionTimeMs: 0,
+      isFilterOpen: true,
       sortConfig: { column: 'marketCap', direction: 'desc' },
       selectedSymbol: null,
       watchlist: ['RELIANCE', 'TCS', 'HDFCBANK'],
       pinnedColumns: ['symbol'],
-      filterExecutionTimeMs: 0,
       priceFlashes: {},
       isStreaming: true,
 
       setStocks: (stocks: Stock[]) => {
         set((state) => {
           state.stocks = stocks;
-          const watchlistSet = new Set(state.watchlist);
           const result = executeFilterEngine(
             stocks,
             state.activeFilters,
             state.sortConfig,
-            watchlistSet
+            state.watchlist
           );
-          state.filteredStocks = result.filtered;
+          state.filteredStocks = result.filteredStocks;
           state.filterExecutionTimeMs = result.executionTimeMs;
         });
       },
@@ -86,25 +89,19 @@ export const useStockStore = create<StockStoreState>()(
             state.watchlist.push(symbol);
           }
 
-          // If filtering by watchlist, update filteredStocks
-          const hasWatchlistFilter = state.activeFilters.some(
-            (f) => f.id === 'watchlist-only' && f.enabled
-          );
-          if (hasWatchlistFilter) {
-            const watchlistSet = new Set(state.watchlist);
+          if (state.activeFilters.watchlistOnly) {
             const result = executeFilterEngine(
               state.stocks,
               state.activeFilters,
               state.sortConfig,
-              watchlistSet
+              state.watchlist
             );
-            state.filteredStocks = result.filtered;
+            state.filteredStocks = result.filteredStocks;
             state.filterExecutionTimeMs = result.executionTimeMs;
           }
         });
       },
 
-      // Cycles: desc -> asc -> desc
       setSortConfig: (columnOrSort: keyof Stock | SortConfig | null) => {
         set((state) => {
           let nextSort: SortConfig;
@@ -126,14 +123,13 @@ export const useStockStore = create<StockStoreState>()(
           }
 
           state.sortConfig = nextSort;
-          const watchlistSet = new Set(state.watchlist);
           const result = executeFilterEngine(
             state.stocks,
             state.activeFilters,
             nextSort,
-            watchlistSet
+            state.watchlist
           );
-          state.filteredStocks = result.filtered;
+          state.filteredStocks = result.filteredStocks;
           state.filterExecutionTimeMs = result.executionTimeMs;
         });
       },
@@ -149,7 +145,6 @@ export const useStockStore = create<StockStoreState>()(
 
           if (entries.length === 0) return;
 
-          // Map for fast index lookup
           const filteredMap = new Map<string, number>();
           for (let i = 0; i < state.filteredStocks.length; i++) {
             filteredMap.set(state.filteredStocks[i].symbol, i);
@@ -184,69 +179,94 @@ export const useStockStore = create<StockStoreState>()(
         });
       },
 
-      setFilter: (filter: FilterConfig) => {
+      // Filter Actions
+      updateFilter: (field: string, value: any) => {
         set((state) => {
-          const idx = state.activeFilters.findIndex((f) => f.id === filter.id);
-          if (idx >= 0) {
-            state.activeFilters[idx] = filter;
+          // If value is null, undefined, or empty array, remove filter
+          if (
+            value === null ||
+            value === undefined ||
+            value === '' ||
+            (Array.isArray(value) && value.length === 0) ||
+            (typeof value === 'object' &&
+              !Array.isArray(value) &&
+              (value.min === null || value.min === undefined || isNaN(value.min)) &&
+              (value.max === null || value.max === undefined || isNaN(value.max)))
+          ) {
+            delete state.activeFilters[field];
           } else {
-            state.activeFilters.push(filter);
+            state.activeFilters[field] = value;
           }
 
-          const watchlistSet = new Set(state.watchlist);
           const result = executeFilterEngine(
             state.stocks,
             state.activeFilters,
             state.sortConfig,
-            watchlistSet
+            state.watchlist
           );
-          state.filteredStocks = result.filtered;
+          state.filteredStocks = result.filteredStocks;
           state.filterExecutionTimeMs = result.executionTimeMs;
         });
       },
 
-      removeFilter: (filterId: string) => {
+      removeFilter: (field: string) => {
         set((state) => {
-          state.activeFilters = state.activeFilters.filter((f) => f.id !== filterId);
-          const watchlistSet = new Set(state.watchlist);
+          delete state.activeFilters[field];
           const result = executeFilterEngine(
             state.stocks,
             state.activeFilters,
             state.sortConfig,
-            watchlistSet
+            state.watchlist
           );
-          state.filteredStocks = result.filtered;
+          state.filteredStocks = result.filteredStocks;
+          state.filterExecutionTimeMs = result.executionTimeMs;
+        });
+      },
+
+      clearAllFilters: () => {
+        set((state) => {
+          state.activeFilters = {};
+          const result = executeFilterEngine(
+            state.stocks,
+            {},
+            state.sortConfig,
+            state.watchlist
+          );
+          state.filteredStocks = result.filteredStocks;
           state.filterExecutionTimeMs = result.executionTimeMs;
         });
       },
 
       clearFilters: () => {
+        get().clearAllFilters();
+      },
+
+      applyPreset: (presetNameOrPreset: string | FilterPreset) => {
         set((state) => {
-          state.activeFilters = [];
-          const watchlistSet = new Set(state.watchlist);
-          const result = executeFilterEngine(
-            state.stocks,
-            [],
-            state.sortConfig,
-            watchlistSet
-          );
-          state.filteredStocks = result.filtered;
-          state.filterExecutionTimeMs = result.executionTimeMs;
+          let preset: FilterPreset | undefined;
+          if (typeof presetNameOrPreset === 'string') {
+            preset = PRESET_MAP[presetNameOrPreset];
+          } else {
+            preset = presetNameOrPreset;
+          }
+
+          if (preset) {
+            state.activeFilters = { ...preset.filterMap };
+            const result = executeFilterEngine(
+              state.stocks,
+              state.activeFilters,
+              state.sortConfig,
+              state.watchlist
+            );
+            state.filteredStocks = result.filteredStocks;
+            state.filterExecutionTimeMs = result.executionTimeMs;
+          }
         });
       },
 
-      applyPreset: (preset: FilterPreset) => {
+      toggleFilterPanel: () => {
         set((state) => {
-          state.activeFilters = [...preset.filters];
-          const watchlistSet = new Set(state.watchlist);
-          const result = executeFilterEngine(
-            state.stocks,
-            state.activeFilters,
-            state.sortConfig,
-            watchlistSet
-          );
-          state.filteredStocks = result.filtered;
-          state.filterExecutionTimeMs = result.executionTimeMs;
+          state.isFilterOpen = !state.isFilterOpen;
         });
       },
     })),
