@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStockStore } from '@/stores/useStockStore';
 import { useRealtimePrices } from '@/hooks/useRealtimePrices';
 import { ScreenerTable } from '@/components/DataGrid/ScreenerTable';
@@ -15,6 +15,7 @@ import {
   Search,
   Pause,
   Play,
+  Activity,
 } from 'lucide-react';
 
 export default function StockScreenerPage() {
@@ -28,16 +29,35 @@ export default function StockScreenerPage() {
   const [mounted, setMounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Prevent hydration mismatch
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Real-time market streaming hook
   const { connectionStatus, isStreaming, toggleStreaming } = useRealtimePrices();
 
-  // Search autocomplete
+  // Power-user shortcuts: '/' focuses search, 'Escape' clears/blurs
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA';
+
+      if (e.key === '/' && !isInput) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (e.key === 'Escape') {
+        if (isSearchOpen || searchQuery) {
+          setIsSearchOpen(false);
+          setSearchQuery('');
+          searchInputRef.current?.blur();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSearchOpen, searchQuery]);
+
   const searchResults = searchQuery.trim()
     ? stocks
         .filter(
@@ -54,7 +74,7 @@ export default function StockScreenerPage() {
       'Symbol',
       'Company Name',
       'Sector',
-      'Price (₹)',
+      'Price (INR)',
       'Change %',
       'Market Cap (Cr)',
       'P/E',
@@ -81,29 +101,27 @@ export default function StockScreenerPage() {
       s.rsi14,
     ]);
 
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csv = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const uri = encodeURI(csv);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `stock_screener_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.href = uri;
+    link.download = `bharat_screener_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#090d16]">
-      {/* 64px Header */}
-      <header className="h-16 shrink-0 flex items-center justify-between px-4 bg-[#080d1a] border-b border-slate-800 shadow-lg z-30">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
+      {/* 60px Terminal Header */}
+      <header className="h-14 shrink-0 flex items-center justify-between px-3.5 bg-slate-900 border-b border-slate-800 shadow-md z-30">
         <div className="flex items-center space-x-3">
           <button
             onClick={toggleFilterPanel}
-            className={`p-2 rounded-lg border transition-colors ${
+            className={`p-1.5 rounded border transition-colors ${
               isFilterOpen
                 ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm'
-                : 'bg-surface-elevated border-slate-800 text-slate-300 hover:text-white'
+                : 'bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
             }`}
             title="Toggle Filter Sidebar"
             aria-label="Toggle filters"
@@ -112,46 +130,51 @@ export default function StockScreenerPage() {
           </button>
 
           <div className="flex items-center space-x-2.5">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-cyan-500 shadow-md">
-              <TrendingUp className="w-5 h-5 text-white" />
+            <div className="flex items-center justify-center w-7 h-7 rounded bg-gradient-to-tr from-indigo-600 to-cyan-500 shadow-sm">
+              <TrendingUp className="w-4 h-4 text-white" />
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-sm font-bold text-white tracking-tight font-sans">
-                  Real-Time Stock Screener
+              <div className="flex items-center space-x-1.5">
+                <h1 className="text-xs font-bold text-slate-100 tracking-tight font-sans">
+                  BHARAT SCREENER
                 </h1>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800/60 font-semibold">
+                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/60 font-semibold">
                   NSE • BSE
                 </span>
               </div>
-              <div className="flex items-center space-x-2 text-[10px] text-slate-400">
+              <div className="text-[10px] text-slate-400 font-mono">
                 <span>
-                  Showing <strong className="text-indigo-300">{filteredStocks.length.toLocaleString('en-IN')}</strong> of {stocks.length.toLocaleString('en-IN')} Equities
+                  <strong className="text-indigo-400 font-medium">{filteredStocks.length.toLocaleString('en-IN')}</strong> / {stocks.length.toLocaleString('en-IN')} Equities
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Search Bar with Autocomplete */}
+        {/* Search Bar with '/' Shortcut */}
         <div className="relative flex-1 max-w-sm mx-4 hidden md:block">
           <div className="relative">
-            <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-400" />
+            <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-500" />
             <input
+              ref={searchInputRef}
               type="text"
-              placeholder="Search ticker (e.g., RELIANCE, TCS)..."
+              placeholder="Search ticker (e.g., RELIANCE) [Press / to focus]..."
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setIsSearchOpen(true);
               }}
               onFocus={() => setIsSearchOpen(true)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-900/90 border border-slate-800 rounded-lg text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all font-sans"
+              className="w-full pl-8 pr-8 py-1 text-xs bg-slate-950 border border-slate-800 rounded text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-sans"
             />
+            <kbd className="absolute right-2 top-1.5 px-1.5 py-0.2 text-[9px] font-mono text-slate-400 bg-slate-800 border border-slate-700 rounded pointer-events-none">
+              /
+            </kbd>
           </div>
 
+          {/* Autocomplete Dropdown */}
           {isSearchOpen && searchResults.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-1 bg-[#0f172a] border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50">
+            <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded shadow-xl overflow-hidden z-50">
               {searchResults.map((item) => (
                 <button
                   key={item.symbol}
@@ -160,17 +183,17 @@ export default function StockScreenerPage() {
                     setIsSearchOpen(false);
                     setSearchQuery('');
                   }}
-                  className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center justify-between border-b border-slate-800/60 last:border-b-0 transition-colors"
+                  className="w-full px-3 py-1.5 text-left hover:bg-slate-800 flex items-center justify-between border-b border-slate-800/60 last:border-b-0 transition-colors"
                 >
                   <div className="flex items-center space-x-2">
                     <span className="font-mono font-bold text-xs text-indigo-300">
                       {item.symbol}
                     </span>
-                    <span className="text-xs text-slate-300 truncate max-w-[180px]">
+                    <span className="text-xs text-slate-300 truncate max-w-[170px]">
                       {item.companyName}
                     </span>
                   </div>
-                  <span className="text-xs font-mono text-slate-200">
+                  <span className="text-xs font-mono tabular-nums text-slate-200">
                     ₹{item.lastPrice}
                   </span>
                 </button>
@@ -179,11 +202,11 @@ export default function StockScreenerPage() {
           )}
         </div>
 
-        {/* Status Badge & Actions */}
-        <div className="flex items-center space-x-2.5">
-          {/* Live Status Indicator Pill */}
+        {/* Live Indicator, Controls & CSV Export */}
+        <div className="flex items-center space-x-2">
+          {/* Live Status Pill */}
           <div
-            className={`flex items-center space-x-1.5 px-3 py-1 rounded-full border text-xs transition-colors ${
+            className={`flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full border text-[11px] transition-colors ${
               connectionStatus === 'Connected'
                 ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-400'
                 : connectionStatus === 'Reconnecting'
@@ -205,50 +228,39 @@ export default function StockScreenerPage() {
                 }`}
               ></span>
             </span>
-            <span className="font-medium text-[11px] whitespace-nowrap">
-              {connectionStatus === 'Connected'
-                ? 'Live Market (WebSocket Active)'
-                : connectionStatus === 'Reconnecting'
-                ? 'Reconnecting...'
-                : 'Stream Paused'}
+            <span className="font-medium whitespace-nowrap">
+              {connectionStatus === 'Connected' ? 'Live Ticker' : connectionStatus}
             </span>
           </div>
 
-          {/* Tick Rate Badge */}
-          {connectionStatus === 'Connected' && (
-            <div className="hidden xl:flex items-center space-x-1 px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/40 text-[10px] font-mono text-indigo-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-              <span>~15 updates/sec</span>
-            </div>
-          )}
-
-          {/* Pause / Resume Stream */}
+          {/* Pause / Resume */}
           <button
             onClick={toggleStreaming}
-            className={`hidden sm:flex items-center space-x-1 px-2.5 py-1 rounded text-xs border transition-colors ${
+            className={`flex items-center space-x-1 px-2 py-1 rounded text-xs border transition-colors ${
               isStreaming
                 ? 'bg-rose-950/40 border-rose-800/60 text-rose-300 hover:bg-rose-900/60'
                 : 'bg-emerald-950/40 border-emerald-800/60 text-emerald-300 hover:bg-emerald-900/60'
             }`}
+            title={isStreaming ? 'Pause Price Stream' : 'Resume Price Stream'}
           >
             {isStreaming ? (
               <>
-                <Pause className="w-3 h-3" />
-                <span className="text-[11px]">Pause Stream</span>
+                <Pause className="w-2.5 h-2.5" />
+                <span className="text-[10px] hidden sm:inline">Pause</span>
               </>
             ) : (
               <>
-                <Play className="w-3 h-3" />
-                <span className="text-[11px]">Resume Stream</span>
+                <Play className="w-2.5 h-2.5" />
+                <span className="text-[10px] hidden sm:inline">Resume</span>
               </>
             )}
           </button>
 
           {/* Watchlist Counter */}
-          <div className="hidden lg:flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-surface-elevated border border-slate-800 text-slate-300 text-xs">
-            <Bookmark className="w-3.5 h-3.5 text-amber-400" />
-            <span className="text-[11px]">Watchlist:</span>
-            <span className="font-mono font-semibold text-amber-300">
+          <div className="hidden lg:flex items-center space-x-1 px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-xs">
+            <Bookmark className="w-3 h-3 text-amber-400" />
+            <span className="text-[10px] text-slate-400">Watch:</span>
+            <span className="font-mono font-semibold text-amber-300 text-xs">
               {mounted ? watchlist.length : 0}
             </span>
           </div>
@@ -256,33 +268,27 @@ export default function StockScreenerPage() {
           {/* CSV Export */}
           <button
             onClick={handleExportCSV}
-            className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-surface-elevated hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-colors text-xs"
-            title="Export to CSV"
+            className="flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 transition-colors text-xs"
+            title="Export filtered dataset to CSV"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline text-[11px]">Export</span>
+            <Download className="w-3 h-3" />
+            <span className="text-[11px] hidden sm:inline">CSV</span>
           </button>
         </div>
       </header>
 
-      {/* Main Viewport: h-[calc(100vh-64px)] overflow-hidden with FilterSidebar on left and Table on right */}
-      <main className="h-[calc(100vh-64px)] w-full flex overflow-hidden relative">
-        {/* Collapsible 320px Filter Sidebar */}
+      {/* Main Viewport */}
+      <main className="h-[calc(100vh-56px)] w-full flex overflow-hidden relative">
         <FilterSidebar />
 
-        {/* Data Grid Section */}
-        <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#090d16]">
-          {/* Active Filter Tag Chips */}
+        <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-950">
           <ActiveFilterChips />
-
-          {/* Virtual Table */}
           <div className="flex-1 overflow-hidden">
             <ScreenerTable />
           </div>
         </div>
       </main>
 
-      {/* TradingView Chart Modal on Selected Symbol */}
       <StockChartModal />
     </div>
   );

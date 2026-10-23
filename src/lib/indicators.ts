@@ -1,8 +1,3 @@
-/**
- * Pure Mathematical Technical Indicator Calculations
- * Designed from scratch without third-party indicator libraries
- */
-
 export interface BollingerBandPoint {
   upper: number | null;
   middle: number | null;
@@ -16,211 +11,174 @@ export interface VolumeProfileBucket {
   percentage: number;
 }
 
-/**
- * Simple Moving Average (SMA)
- * Returns array of same length as data, with null for indices < period - 1
- */
 export function calculateSMA(data: number[], period: number): (number | null)[] {
-  const result: (number | null)[] = new Array(data.length).fill(null);
-  if (data.length < period || period <= 0) return result;
+  const len = data.length;
+  const out: (number | null)[] = new Array(len).fill(null);
+  if (len < period || period <= 0) return out;
 
   let sum = 0;
-  for (let i = 0; i < period; i++) {
-    sum += data[i];
-  }
-  result[period - 1] = Number((sum / period).toFixed(4));
+  for (let i = 0; i < period; i++) sum += data[i];
+  out[period - 1] = Number((sum / period).toFixed(4));
 
-  for (let i = period; i < data.length; i++) {
+  for (let i = period; i < len; i++) {
     sum += data[i] - data[i - period];
-    result[i] = Number((sum / period).toFixed(4));
+    out[i] = Number((sum / period).toFixed(4));
   }
-
-  return result;
+  return out;
 }
 
-/**
- * Helper to get clean array of non-null SMA values (used in Vitest unit tests)
- */
 export function getValidSMAValues(data: number[], period: number): number[] {
-  const all = calculateSMA(data, period);
-  return all.filter((v): v is number => v !== null).map((v) => Number(v.toFixed(1)));
+  const sma = calculateSMA(data, period);
+  const out: number[] = [];
+  for (let i = period - 1; i < sma.length; i++) {
+    const val = sma[i];
+    if (val !== null) out.push(Number(val.toFixed(1)));
+  }
+  return out;
 }
 
-/**
- * Exponential Moving Average (EMA)
- * Multiplier k = 2 / (period + 1)
- * Initial seed at index `period - 1` uses SMA of the first `period` items
- */
 export function calculateEMA(data: number[], period: number): (number | null)[] {
-  const result: (number | null)[] = new Array(data.length).fill(null);
-  if (data.length < period || period <= 0) return result;
+  const len = data.length;
+  const out: (number | null)[] = new Array(len).fill(null);
+  if (len < period || period <= 0) return out;
 
   const k = 2 / (period + 1);
-
-  // Initial SMA seed
   let sum = 0;
-  for (let i = 0; i < period; i++) {
-    sum += data[i];
-  }
-  let prevEMA = sum / period;
-  result[period - 1] = Number(prevEMA.toFixed(4));
+  for (let i = 0; i < period; i++) sum += data[i];
 
-  // Iterative EMA
-  for (let i = period; i < data.length; i++) {
-    const currentEMA = data[i] * k + prevEMA * (1 - k);
-    result[i] = Number(currentEMA.toFixed(4));
-    prevEMA = currentEMA;
-  }
+  let prev = sum / period;
+  out[period - 1] = Number(prev.toFixed(4));
 
-  return result;
+  for (let i = period; i < len; i++) {
+    prev = data[i] * k + prev * (1 - k);
+    out[i] = Number(prev.toFixed(4));
+  }
+  return out;
 }
 
-/**
- * Bollinger Bands
- * Middle Band = SMA(period)
- * Upper Band = SMA(period) + multiplier * Population SD
- * Lower Band = SMA(period) - multiplier * Population SD
- */
 export function calculateBollingerBands(
   data: number[],
   period = 20,
   multiplier = 2
 ): BollingerBandPoint[] {
-  const result: BollingerBandPoint[] = new Array(data.length).fill(null).map(() => ({
-    upper: null,
-    middle: null,
-    lower: null,
-  }));
+  const len = data.length;
+  const out: BollingerBandPoint[] = new Array(len);
 
-  if (data.length < period || period <= 0) return result;
+  for (let i = 0; i < len; i++) {
+    out[i] = { upper: null, middle: null, lower: null };
+  }
+  if (len < period || period <= 0) return out;
 
-  for (let i = period - 1; i < data.length; i++) {
-    const window = data.slice(i - period + 1, i + 1);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += data[i];
 
-    // Mean
-    const mean = window.reduce((acc, val) => acc + val, 0) / period;
+  for (let i = period - 1; i < len; i++) {
+    if (i >= period) {
+      sum += data[i] - data[i - period];
+    }
+    const mean = sum / period;
 
-    // Population Standard Deviation (divide by N, not N-1)
-    const variance =
-      window.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / period;
-    const sd = Math.sqrt(variance);
+    // Population variance over rolling window without array allocation
+    let varianceSum = 0;
+    const start = i - period + 1;
+    for (let j = start; j <= i; j++) {
+      const diff = data[j] - mean;
+      varianceSum += diff * diff;
+    }
+    const sd = Math.sqrt(varianceSum / period);
 
-    result[i] = {
+    out[i] = {
       middle: Number(mean.toFixed(2)),
       upper: Number((mean + multiplier * sd).toFixed(2)),
       lower: Number((mean - multiplier * sd).toFixed(2)),
     };
   }
-
-  return result;
+  return out;
 }
 
-/**
- * Relative Strength Index (RSI 14)
- * Uses Wilder's Smoothing Technique
- * Bound between 0 and 100
- */
 export function calculateRSI(data: number[], period = 14): (number | null)[] {
-  const result: (number | null)[] = new Array(data.length).fill(null);
-  if (data.length <= period) return result;
-
-  const changes: number[] = [];
-  for (let i = 1; i < data.length; i++) {
-    changes.push(data[i] - data[i - 1]);
-  }
+  const len = data.length;
+  const out: (number | null)[] = new Array(len).fill(null);
+  if (len <= period) return out;
 
   let gainsSum = 0;
   let lossesSum = 0;
 
-  for (let i = 0; i < period; i++) {
-    const change = changes[i];
-    if (change > 0) gainsSum += change;
-    else lossesSum += Math.abs(change);
+  for (let i = 1; i <= period; i++) {
+    const diff = data[i] - data[i - 1];
+    if (diff > 0) gainsSum += diff;
+    else lossesSum += -diff;
   }
 
   let avgGain = gainsSum / period;
   let avgLoss = lossesSum / period;
 
-  // First RSI value at index `period` (corresponding to data[period])
-  if (avgLoss === 0) {
-    result[period] = 100;
-  } else if (avgGain === 0) {
-    result[period] = 0;
-  } else {
-    const rs = avgGain / avgLoss;
-    result[period] = Number((100 - 100 / (1 + rs)).toFixed(2));
-  }
+  const toRSI = (g: number, l: number): number => {
+    if (l === 0) return 100;
+    if (g === 0) return 0;
+    return Number((100 - 100 / (1 + g / l)).toFixed(2));
+  };
 
-  // Wilder's smoothing for subsequent periods
-  for (let i = period + 1; i < data.length; i++) {
-    const change = changes[i - 1];
-    const gain = change > 0 ? change : 0;
-    const loss = change < 0 ? Math.abs(change) : 0;
+  out[period] = toRSI(avgGain, avgLoss);
+
+  // Wilder's recursive smoothing
+  for (let i = period + 1; i < len; i++) {
+    const diff = data[i] - data[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
 
     avgGain = (avgGain * (period - 1) + gain) / period;
     avgLoss = (avgLoss * (period - 1) + loss) / period;
-
-    if (avgLoss === 0) {
-      result[i] = 100;
-    } else if (avgGain === 0) {
-      result[i] = 0;
-    } else {
-      const rs = avgGain / avgLoss;
-      result[i] = Number((100 - 100 / (1 + rs)).toFixed(2));
-    }
+    out[i] = toRSI(avgGain, avgLoss);
   }
-
-  return result;
+  return out;
 }
 
-/**
- * Volume Profile
- * Aggregates volume into 30 price buckets across the candle series
- */
 export function calculateVolumeProfile(
   candles: { high: number; low: number; close: number; volume: number }[],
   bucketCount = 30
 ): VolumeProfileBucket[] {
-  if (candles.length === 0) return [];
+  const len = candles.length;
+  if (len === 0) return [];
 
-  let minPrice = Infinity;
-  let maxPrice = -Infinity;
-  let totalVolume = 0;
+  let min = Infinity;
+  let max = -Infinity;
+  let totalVol = 0;
 
-  for (const c of candles) {
-    if (c.low < minPrice) minPrice = c.low;
-    if (c.high > maxPrice) maxPrice = c.high;
-    totalVolume += c.volume;
+  for (let i = 0; i < len; i++) {
+    const c = candles[i];
+    if (c.low < min) min = c.low;
+    if (c.high > max) max = c.high;
+    totalVol += c.volume;
+  }
+  if (min >= max) return [];
+
+  const span = max - min;
+  const step = span / bucketCount;
+  const volumes = new Float64Array(bucketCount);
+
+  for (let i = 0; i < len; i++) {
+    const c = candles[i];
+    const mid = (c.high + c.low + c.close) / 3;
+    const idx = Math.min(bucketCount - 1, Math.max(0, Math.floor((mid - min) / step)));
+    volumes[idx] += c.volume;
   }
 
-  if (minPrice >= maxPrice) return [];
-
-  const bucketSize = (maxPrice - minPrice) / bucketCount;
-  const buckets: { volume: number }[] = Array.from({ length: bucketCount }, () => ({
-    volume: 0,
-  }));
-
-  for (const c of candles) {
-    const midPrice = (c.high + c.low + c.close) / 3;
-    const index = Math.min(
-      bucketCount - 1,
-      Math.max(0, Math.floor((midPrice - minPrice) / bucketSize))
-    );
-    buckets[index].volume += c.volume;
+  const out: VolumeProfileBucket[] = new Array(bucketCount);
+  for (let i = 0; i < bucketCount; i++) {
+    const v = volumes[i];
+    out[i] = {
+      priceStart: Number((min + i * step).toFixed(2)),
+      priceEnd: Number((min + (i + 1) * step).toFixed(2)),
+      volume: v,
+      percentage: totalVol > 0 ? Number(((v / totalVol) * 100).toFixed(1)) : 0,
+    };
   }
-
-  return buckets.map((b, idx) => ({
-    priceStart: Number((minPrice + idx * bucketSize).toFixed(2)),
-    priceEnd: Number((minPrice + (idx + 1) * bucketSize).toFixed(2)),
-    volume: b.volume,
-    percentage: totalVolume > 0 ? Number(((b.volume / totalVolume) * 100).toFixed(1)) : 0,
-  }));
+  return out;
 }
 
-// Aliases matching Step 4 specifications
 export const SMA = calculateSMA;
 export const EMA = calculateEMA;
 export const BollingerBands = calculateBollingerBands;
 export const RSI = calculateRSI;
 export const VolumeProfile = calculateVolumeProfile;
-

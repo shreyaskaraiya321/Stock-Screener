@@ -7,7 +7,7 @@ import {
   VolumeVsAvg,
 } from '@/types/stock';
 
-// Deterministic Pseudo-Random Number Generator (Mulberry32) for instant reproducible 5000 stocks
+// Deterministic PRNG (Mulberry32) for reproducible 5,000-stock market dataset
 function createPRNG(seed: number) {
   let s = seed;
   return function () {
@@ -345,6 +345,15 @@ export function generateIndianStocks(): Stock[] {
   }
 
   return stocks;
+}
+
+let _cachedDataset: Stock[] | null = null;
+
+export function getInitialStockDataset(): Stock[] {
+  if (!_cachedDataset) {
+    _cachedDataset = generateIndianStocks().sort((a, b) => b.marketCap - a.marketCap);
+  }
+  return _cachedDataset;
 }
 
 export const generateMockStocks = (count = 5000): Stock[] => generateIndianStocks();

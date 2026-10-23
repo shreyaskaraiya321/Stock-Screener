@@ -60,6 +60,18 @@ export const StockChartModal: React.FC = () => {
     volume: number;
   } | null>(null);
 
+  // Power-user shortcut: Escape closes modal
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedSymbol(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedSymbol, setSelectedSymbol]);
+
   // Generate 252 trading days of data for the stock
   const ohlcv = useMemo(() => {
     if (!stock) return [];

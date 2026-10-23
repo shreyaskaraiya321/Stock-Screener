@@ -6,7 +6,7 @@ interface PriceCellProps {
   flash?: 'up' | 'down' | null;
 }
 
-export const PriceCell: React.FC<PriceCellProps> = React.memo(
+export const PriceCell = React.memo<PriceCellProps>(
   ({ price, flash }) => {
     const flashClass =
       flash === 'up'
@@ -17,14 +17,13 @@ export const PriceCell: React.FC<PriceCellProps> = React.memo(
 
     return (
       <div
-        className={`px-2 py-1 rounded text-right font-mono text-xs tabular-nums transition-colors duration-300 ${flashClass}`}
+        className={`px-2 py-0.5 rounded text-right font-mono text-xs tabular-nums transition-colors duration-300 ${flashClass}`}
       >
         {formatINR(price)}
       </div>
     );
   },
-  (prevProps, nextProps) =>
-    prevProps.price === nextProps.price && prevProps.flash === nextProps.flash
+  (prev, next) => prev.price === next.price && prev.flash === next.flash
 );
 
 PriceCell.displayName = 'PriceCell';

@@ -3,7 +3,7 @@ import { immer } from 'zustand/middleware/immer';
 import { persist } from 'zustand/middleware';
 import { enableMapSet } from 'immer';
 import { Stock, SortConfig, PriceUpdate } from '@/types/stock';
-import { generateMockStocks } from '@/lib/mockDataGenerator';
+import { getInitialStockDataset } from '@/lib/mockDataGenerator';
 import { executeFilterEngine, ActiveFiltersState } from '@/lib/filterEngine';
 import { FilterPreset, PRESET_MAP } from '@/lib/filterPresets';
 
@@ -27,40 +27,43 @@ export interface StockStoreState {
   watchlist: string[];
   pinnedColumns: string[];
   priceFlashes: Record<string, 'up' | 'down'>;
-  
-  // Real-time streaming state (Step 5)
   connectionStatus: ConnectionStatus;
   isStreamingActive: boolean;
-  isStreaming: boolean; // Alias
+  isStreaming: boolean;
   lastPriceUpdates: Map<string, PriceUpdateRecord>;
   latestTickCount: number;
 
-  // Actions
   setStocks: (stocks: Stock[]) => void;
   setSelectedSymbol: (symbol: string | null) => void;
   toggleWatchlist: (symbol: string) => void;
-  setSortConfig: (columnOrSort: keyof Stock | SortConfig | null) => void;
-  
-  // Step 5 Streaming Actions
+  setSortConfig: (colOrSort: keyof Stock | SortConfig | null) => void;
   toggleStreaming: () => void;
-  setStreaming: (isStreaming: boolean) => void;
+  setStreaming: (active: boolean) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   batchUpdatePrices: (
     updates: Map<string, Partial<Stock>> | PriceUpdate[] | Map<string, any>
   ) => void;
   clearFlash: (symbol: string) => void;
-
-  // Filter Actions
   updateFilter: (field: string, value: any) => void;
   removeFilter: (field: string) => void;
   clearAllFilters: () => void;
   clearFilters: () => void;
-  applyPreset: (presetNameOrPreset: string | FilterPreset) => void;
+  applyPreset: (preset: string | FilterPreset) => void;
   toggleFilterPanel: () => void;
 }
 
-// Initial 5,000 stocks sorted by marketCap desc
-const initialStocks = generateMockStocks(5000).sort((a, b) => b.marketCap - a.marketCap);
+// Module-level cached lookup for O(1) ticker updates across 5,000 items
+const masterIndex = new Map<string, number>();
+
+function rebuildMasterIndex(stocks: Stock[]) {
+  masterIndex.clear();
+  for (let i = 0; i < stocks.length; i++) {
+    masterIndex.set(stocks[i].symbol, i);
+  }
+}
+
+const initialStocks = getInitialStockDataset();
+rebuildMasterIndex(initialStocks);
 
 export const useStockStore = create<StockStoreState>()(
   persist(
@@ -75,89 +78,78 @@ export const useStockStore = create<StockStoreState>()(
       watchlist: ['RELIANCE', 'TCS', 'HDFCBANK'],
       pinnedColumns: ['symbol'],
       priceFlashes: {},
-
-      // Real-time streaming initial state
       connectionStatus: 'Connected',
       isStreamingActive: true,
       isStreaming: true,
-      lastPriceUpdates: new Map<string, PriceUpdateRecord>(),
+      lastPriceUpdates: new Map(),
       latestTickCount: 0,
 
-      setStocks: (stocks: Stock[]) => {
+      setStocks: (stocks) => {
+        rebuildMasterIndex(stocks);
         set((state) => {
           state.stocks = stocks;
-          const result = executeFilterEngine(
+          const res = executeFilterEngine(
             stocks,
             state.activeFilters,
             state.sortConfig,
             state.watchlist
           );
-          state.filteredStocks = result.filteredStocks;
-          state.filterExecutionTimeMs = result.executionTimeMs;
+          state.filteredStocks = res.filteredStocks;
+          state.filterExecutionTimeMs = res.executionTimeMs;
         });
       },
 
-      setSelectedSymbol: (symbol: string | null) => {
+      setSelectedSymbol: (symbol) => {
         set((state) => {
           state.selectedSymbol = symbol;
         });
       },
 
-      toggleWatchlist: (symbol: string) => {
+      toggleWatchlist: (symbol) => {
         set((state) => {
-          const index = state.watchlist.indexOf(symbol);
-          if (index >= 0) {
-            state.watchlist.splice(index, 1);
-          } else {
-            state.watchlist.push(symbol);
-          }
+          const idx = state.watchlist.indexOf(symbol);
+          if (idx >= 0) state.watchlist.splice(idx, 1);
+          else state.watchlist.push(symbol);
 
           if (state.activeFilters.watchlistOnly) {
-            const result = executeFilterEngine(
+            const res = executeFilterEngine(
               state.stocks,
               state.activeFilters,
               state.sortConfig,
               state.watchlist
             );
-            state.filteredStocks = result.filteredStocks;
-            state.filterExecutionTimeMs = result.executionTimeMs;
+            state.filteredStocks = res.filteredStocks;
+            state.filterExecutionTimeMs = res.executionTimeMs;
           }
         });
       },
 
-      setSortConfig: (columnOrSort: keyof Stock | SortConfig | null) => {
+      setSortConfig: (colOrSort) => {
         set((state) => {
-          let nextSort: SortConfig;
-
-          if (!columnOrSort) {
-            nextSort = { column: 'marketCap', direction: 'desc' };
-          } else if (typeof columnOrSort === 'object') {
-            nextSort = columnOrSort;
+          let next: SortConfig;
+          if (!colOrSort) {
+            next = { column: 'marketCap', direction: 'desc' };
+          } else if (typeof colOrSort === 'object') {
+            next = colOrSort;
           } else {
-            const column = columnOrSort;
-            if (state.sortConfig.column === column) {
-              nextSort = {
-                column,
-                direction: state.sortConfig.direction === 'desc' ? 'asc' : 'desc',
-              };
-            } else {
-              nextSort = { column, direction: 'desc' };
-            }
+            const isSame = state.sortConfig.column === colOrSort;
+            next = {
+              column: colOrSort,
+              direction: isSame && state.sortConfig.direction === 'desc' ? 'asc' : 'desc',
+            };
           }
-
-          state.sortConfig = nextSort;
-          const result = executeFilterEngine(
+          state.sortConfig = next;
+          const res = executeFilterEngine(
             state.stocks,
             state.activeFilters,
-            nextSort,
+            next,
             state.watchlist
           );
-          state.filteredStocks = result.filteredStocks;
-          state.filterExecutionTimeMs = result.executionTimeMs;
+          state.filteredStocks = res.filteredStocks;
+          state.filterExecutionTimeMs = res.executionTimeMs;
         });
       },
 
-      // Streaming Actions
       toggleStreaming: () => {
         set((state) => {
           state.isStreamingActive = !state.isStreamingActive;
@@ -166,7 +158,7 @@ export const useStockStore = create<StockStoreState>()(
         });
       },
 
-      setStreaming: (active: boolean) => {
+      setStreaming: (active) => {
         set((state) => {
           state.isStreamingActive = active;
           state.isStreaming = active;
@@ -174,15 +166,13 @@ export const useStockStore = create<StockStoreState>()(
         });
       },
 
-      setConnectionStatus: (status: ConnectionStatus) => {
+      setConnectionStatus: (status) => {
         set((state) => {
           state.connectionStatus = status;
         });
       },
 
-      batchUpdatePrices: (
-        updates: Map<string, Partial<Stock>> | PriceUpdate[] | Map<string, any>
-      ) => {
+      batchUpdatePrices: (updates) => {
         set((state) => {
           const entries: [string, Partial<Stock>][] =
             updates instanceof Map
@@ -190,107 +180,102 @@ export const useStockStore = create<StockStoreState>()(
               : updates.map((u) => [u.symbol, u]);
 
           if (entries.length === 0) return;
-
-          const now = Date.now();
           state.latestTickCount = entries.length;
+          const now = Date.now();
 
-          // Index maps for constant-time mutations
-          const filteredMap = new Map<string, number>();
+          // Ephemeral map for current filtered view to avoid scanning N items per update
+          const filteredIndex = new Map<string, number>();
           for (let i = 0; i < state.filteredStocks.length; i++) {
-            filteredMap.set(state.filteredStocks[i].symbol, i);
+            filteredIndex.set(state.filteredStocks[i].symbol, i);
           }
 
-          const masterMap = new Map<string, number>();
-          for (let i = 0; i < state.stocks.length; i++) {
-            masterMap.set(state.stocks[i].symbol, i);
-          }
+          for (let i = 0; i < entries.length; i++) {
+            const [sym, patch] = entries[i];
 
-          for (const [sym, patch] of entries) {
-            const filteredIdx = filteredMap.get(sym);
-            if (filteredIdx !== undefined) {
-              const stock = state.filteredStocks[filteredIdx];
-              const oldPrice = stock.lastPrice;
-              const newPrice = patch.lastPrice ?? oldPrice;
-              const direction: 'up' | 'down' = newPrice >= oldPrice ? 'up' : 'down';
+            // 1. Update filtered stock row if visible
+            const fIdx = filteredIndex.get(sym);
+            if (fIdx !== undefined) {
+              const row = state.filteredStocks[fIdx];
+              const prev = row.lastPrice;
+              const next = patch.lastPrice ?? prev;
+              const dir = next >= prev ? 'up' : 'down';
 
-              if (newPrice !== oldPrice) {
-                state.priceFlashes[sym] = direction;
-                state.lastPriceUpdates.set(sym, { direction, timestamp: now });
+              if (next !== prev) {
+                state.priceFlashes[sym] = dir;
+                state.lastPriceUpdates.set(sym, { direction: dir, timestamp: now });
               }
-
-              Object.assign(stock, patch);
+              Object.assign(row, patch);
             }
 
-            // Also synchronize in master stocks list
-            const masterIdx = masterMap.get(sym);
-            if (masterIdx !== undefined) {
-              Object.assign(state.stocks[masterIdx], patch);
+            // 2. Synchronize master stock record
+            const mIdx = masterIndex.get(sym);
+            if (mIdx !== undefined) {
+              Object.assign(state.stocks[mIdx], patch);
             }
           }
         });
       },
 
-      clearFlash: (symbol: string) => {
+      clearFlash: (symbol) => {
         set((state) => {
           delete state.priceFlashes[symbol];
           state.lastPriceUpdates.delete(symbol);
         });
       },
 
-      // Filter Actions
-      updateFilter: (field: string, value: any) => {
+      updateFilter: (field, value) => {
         set((state) => {
-          if (
-            value === null ||
-            value === undefined ||
+          const isEmpty =
+            value == null ||
             value === '' ||
             (Array.isArray(value) && value.length === 0) ||
             (typeof value === 'object' &&
               !Array.isArray(value) &&
-              (value.min === null || value.min === undefined || isNaN(value.min)) &&
-              (value.max === null || value.max === undefined || isNaN(value.max)))
-          ) {
+              (value.min == null || isNaN(value.min)) &&
+              (value.max == null || isNaN(value.max)));
+
+          if (isEmpty) {
             delete state.activeFilters[field];
           } else {
             state.activeFilters[field] = value;
           }
 
-          const result = executeFilterEngine(
+          const res = executeFilterEngine(
             state.stocks,
             state.activeFilters,
             state.sortConfig,
             state.watchlist
           );
-          state.filteredStocks = result.filteredStocks;
-          state.filterExecutionTimeMs = result.executionTimeMs;
+          state.filteredStocks = res.filteredStocks;
+          state.filterExecutionTimeMs = res.executionTimeMs;
         });
       },
 
-      removeFilter: (field: string) => {
+      removeFilter: (field) => {
         set((state) => {
           delete state.activeFilters[field];
-          const result = executeFilterEngine(
+          const res = executeFilterEngine(
             state.stocks,
             state.activeFilters,
             state.sortConfig,
             state.watchlist
           );
-          state.filteredStocks = result.filteredStocks;
-          state.filterExecutionTimeMs = result.executionTimeMs;
+          state.filteredStocks = res.filteredStocks;
+          state.filterExecutionTimeMs = res.executionTimeMs;
         });
       },
 
       clearAllFilters: () => {
         set((state) => {
           state.activeFilters = {};
-          const result = executeFilterEngine(
+          const res = executeFilterEngine(
             state.stocks,
             {},
             state.sortConfig,
             state.watchlist
           );
-          state.filteredStocks = result.filteredStocks;
-          state.filterExecutionTimeMs = result.executionTimeMs;
+          state.filteredStocks = res.filteredStocks;
+          state.filterExecutionTimeMs = res.executionTimeMs;
         });
       },
 
@@ -298,25 +283,20 @@ export const useStockStore = create<StockStoreState>()(
         get().clearAllFilters();
       },
 
-      applyPreset: (presetNameOrPreset: string | FilterPreset) => {
+      applyPreset: (presetOrName) => {
         set((state) => {
-          let preset: FilterPreset | undefined;
-          if (typeof presetNameOrPreset === 'string') {
-            preset = PRESET_MAP[presetNameOrPreset];
-          } else {
-            preset = presetNameOrPreset;
-          }
-
+          const preset =
+            typeof presetOrName === 'string' ? PRESET_MAP[presetOrName] : presetOrName;
           if (preset) {
             state.activeFilters = { ...preset.filterMap };
-            const result = executeFilterEngine(
+            const res = executeFilterEngine(
               state.stocks,
               state.activeFilters,
               state.sortConfig,
               state.watchlist
             );
-            state.filteredStocks = result.filteredStocks;
-            state.filterExecutionTimeMs = result.executionTimeMs;
+            state.filteredStocks = res.filteredStocks;
+            state.filterExecutionTimeMs = res.executionTimeMs;
           }
         });
       },

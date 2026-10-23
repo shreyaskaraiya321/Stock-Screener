@@ -63,12 +63,12 @@ export const FilterSidebar: React.FC = () => {
 
   return (
     <aside
-      className={`relative z-20 flex flex-col h-full bg-[#0a0f1d] border-r border-slate-800 transition-all duration-300 ease-in-out shrink-0 select-none ${
+      className={`relative z-20 flex flex-col h-full bg-slate-950 border-r border-slate-800 transition-all duration-300 ease-in-out shrink-0 select-none ${
         isFilterOpen ? 'w-[320px]' : 'w-0 overflow-hidden border-r-0'
       }`}
     >
       {/* Sidebar Header */}
-      <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-[#0f172a]">
+      <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-slate-900">
         <div className="flex items-center space-x-2">
           <SlidersHorizontal className="w-4 h-4 text-indigo-400" />
           <h2 className="text-sm font-semibold text-slate-100 tracking-wide font-sans">
