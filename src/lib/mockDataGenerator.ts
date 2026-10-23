@@ -346,3 +346,5 @@ export function generateIndianStocks(): Stock[] {
 
   return stocks;
 }
+
+export const generateMockStocks = (count = 5000): Stock[] => generateIndianStocks();

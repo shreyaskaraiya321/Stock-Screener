@@ -1,20 +1,20 @@
 'use client';
 
-import React, { useRef, useMemo, useCallback } from 'react';
+import React, { useRef, useMemo } from 'react';
 import {
   ColumnDef,
   flexRender,
   getCoreRowModel,
   useReactTable,
-  SortingState,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Stock, SortConfig } from '@/types/stock';
+import { Stock } from '@/types/stock';
 import { useStockStore } from '@/stores/useStockStore';
 import { PriceCell } from './cells/PriceCell';
 import { ChangeCell } from './cells/ChangeCell';
 import { MetricCell } from './cells/MetricCell';
-import { formatMarketCap, formatVolume, formatPercent, formatINR } from '@/lib/formatters';
+import { TextCell } from './cells/TextCell';
+import { formatMarketCap, formatPercent, formatINR } from '@/lib/formatters';
 import { Star, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 export const ScreenerTable: React.FC = () => {
@@ -29,29 +29,7 @@ export const ScreenerTable: React.FC = () => {
   const toggleWatchlist = useStockStore((s) => s.toggleWatchlist);
   const priceFlashes = useStockStore((s) => s.priceFlashes);
 
-  // Sorting bridge between TanStack and Zustand
-  const sortingState: SortingState = useMemo(() => {
-    if (!sortConfig) return [];
-    return [{ id: sortConfig.column, desc: sortConfig.direction === 'desc' }];
-  }, [sortConfig]);
-
-  const handleSortingChange = useCallback(
-    (updaterOrValue: any) => {
-      const nextSorting =
-        typeof updaterOrValue === 'function' ? updaterOrValue(sortingState) : updaterOrValue;
-      if (nextSorting.length > 0) {
-        setSortConfig({
-          column: nextSorting[0].id as keyof Stock,
-          direction: nextSorting[0].desc ? 'desc' : 'asc',
-        });
-      } else {
-        setSortConfig(null);
-      }
-    },
-    [sortingState, setSortConfig]
-  );
-
-  // Define columns
+  // Define columns matching Step 2 specification
   const columns = useMemo<ColumnDef<Stock>[]>(
     () => [
       {
@@ -59,7 +37,7 @@ export const ScreenerTable: React.FC = () => {
         header: '',
         size: 38,
         cell: ({ row }) => {
-          const isStarred = watchlist.has(row.original.symbol);
+          const isStarred = watchlist.includes(row.original.symbol);
           return (
             <button
               onClick={(e) => {
@@ -95,14 +73,19 @@ export const ScreenerTable: React.FC = () => {
       {
         accessorKey: 'companyName',
         header: 'Company Name',
-        size: 180,
+        size: 190,
         cell: ({ row }) => (
-          <div
-            className="text-xs text-slate-300 truncate font-sans max-w-[170px]"
-            title={row.original.companyName}
-          >
-            {row.original.companyName}
-          </div>
+          <TextCell text={row.original.companyName} className="font-sans" />
+        ),
+      },
+      {
+        accessorKey: 'sector',
+        header: 'Sector',
+        size: 120,
+        cell: ({ row }) => (
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700/60 inline-block truncate max-w-[110px]">
+            {row.original.sector}
+          </span>
         ),
       },
       {
@@ -118,8 +101,8 @@ export const ScreenerTable: React.FC = () => {
       },
       {
         accessorKey: 'changePercent',
-        header: 'Change',
-        size: 110,
+        header: 'Change %',
+        size: 105,
         cell: ({ row }) => (
           <ChangeCell
             changePercent={row.original.changePercent}
@@ -130,27 +113,15 @@ export const ScreenerTable: React.FC = () => {
       {
         accessorKey: 'marketCap',
         header: 'Market Cap',
-        size: 120,
+        size: 125,
         cell: ({ row }) => (
-          <div className="text-xs font-mono text-right text-slate-200">
-            {formatMarketCap(row.original.marketCap)}
-          </div>
-        ),
-      },
-      {
-        accessorKey: 'sector',
-        header: 'Sector',
-        size: 120,
-        cell: ({ row }) => (
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700/60 inline-block truncate max-w-[110px]">
-            {row.original.sector}
-          </span>
+          <MetricCell value={formatMarketCap(row.original.marketCap)} />
         ),
       },
       {
         accessorKey: 'pe',
         header: 'P/E',
-        size: 70,
+        size: 75,
         cell: ({ row }) => (
           <MetricCell
             value={row.original.pe.toFixed(1)}
@@ -161,13 +132,13 @@ export const ScreenerTable: React.FC = () => {
       {
         accessorKey: 'pb',
         header: 'P/B',
-        size: 65,
+        size: 70,
         cell: ({ row }) => <MetricCell value={row.original.pb.toFixed(2)} />,
       },
       {
         accessorKey: 'roe',
-        header: 'ROE %',
-        size: 75,
+        header: 'ROE (%)',
+        size: 80,
         cell: ({ row }) => (
           <MetricCell
             value={formatPercent(row.original.roe, 1)}
@@ -176,42 +147,42 @@ export const ScreenerTable: React.FC = () => {
         ),
       },
       {
-        accessorKey: 'roce',
-        header: 'ROCE %',
-        size: 75,
-        cell: ({ row }) => (
-          <MetricCell
-            value={formatPercent(row.original.roce, 1)}
-            highlight={row.original.roce >= 18 ? 'positive' : 'neutral'}
-          />
-        ),
-      },
-      {
         accessorKey: 'debtToEquity',
-        header: 'D/E',
-        size: 65,
+        header: 'Debt/Equity',
+        size: 90,
         cell: ({ row }) => (
           <MetricCell
-            value={row.original.debtToEquity.toFixed(2)}
+            value={`${row.original.debtToEquity.toFixed(2)}x`}
             highlight={row.original.debtToEquity < 0.5 ? 'positive' : row.original.debtToEquity > 3 ? 'warning' : 'neutral'}
           />
         ),
       },
       {
-        accessorKey: 'dividendYield',
-        header: 'Div Yield %',
-        size: 85,
+        accessorKey: 'week52High',
+        header: '52W High',
+        size: 100,
         cell: ({ row }) => (
           <MetricCell
-            value={formatPercent(row.original.dividendYield, 1)}
-            highlight={row.original.dividendYield > 2 ? 'positive' : 'neutral'}
+            value={formatINR(row.original.week52High, 0)}
+            highlight="positive"
+          />
+        ),
+      },
+      {
+        accessorKey: 'week52Low',
+        header: '52W Low',
+        size: 100,
+        cell: ({ row }) => (
+          <MetricCell
+            value={formatINR(row.original.week52Low, 0)}
+            highlight="negative"
           />
         ),
       },
       {
         accessorKey: 'rsi14',
-        header: 'RSI(14)',
-        size: 75,
+        header: 'RSI (14)',
+        size: 80,
         cell: ({ row }) => (
           <MetricCell
             value={row.original.rsi14.toFixed(1)}
@@ -225,64 +196,6 @@ export const ScreenerTable: React.FC = () => {
           />
         ),
       },
-      {
-        accessorKey: 'macdSignal',
-        header: 'MACD',
-        size: 85,
-        cell: ({ row }) => {
-          const sig = row.original.macdSignal;
-          const bg =
-            sig === 'Bullish'
-              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-              : sig === 'Bearish'
-              ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-              : 'bg-slate-800 text-slate-400 border-slate-700';
-          return (
-            <div className="flex justify-center">
-              <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${bg}`}>
-                {sig}
-              </span>
-            </div>
-          );
-        },
-      },
-      {
-        accessorKey: 'volume',
-        header: 'Volume',
-        size: 90,
-        cell: ({ row }) => (
-          <div className="text-xs font-mono text-right text-slate-300">
-            {formatVolume(row.original.volume)}
-          </div>
-        ),
-      },
-      {
-        accessorKey: 'volumeVsAvg',
-        header: 'Vol vs 20D',
-        size: 95,
-        cell: ({ row }) => {
-          const v = row.original.volumeVsAvg;
-          const style =
-            v === '3x' || v === '2x'
-              ? 'text-emerald-400 font-semibold'
-              : v === 'Above'
-              ? 'text-cyan-400'
-              : 'text-slate-400';
-          return <div className={`text-xs font-mono text-center ${style}`}>{v}</div>;
-        },
-      },
-      {
-        id: 'range52W',
-        header: '52W High / Low',
-        size: 145,
-        cell: ({ row }) => (
-          <div className="flex justify-between items-center text-[10px] font-mono tabular-nums text-slate-400 px-1">
-            <span className="text-rose-400">{formatINR(row.original.week52Low, 0)}</span>
-            <span className="text-slate-600">|</span>
-            <span className="text-emerald-400">{formatINR(row.original.week52High, 0)}</span>
-          </div>
-        ),
-      },
     ],
     [watchlist, toggleWatchlist, priceFlashes]
   );
@@ -290,17 +203,12 @@ export const ScreenerTable: React.FC = () => {
   const table = useReactTable({
     data: filteredStocks,
     columns,
-    state: {
-      sorting: sortingState,
-    },
-    onSortingChange: handleSortingChange,
     getCoreRowModel: getCoreRowModel(),
-    manualSorting: true, // Zustand store handles fast sorting
   });
 
   const { rows } = table.getRowModel();
 
-  // TanStack Virtualizer v3: strictly fixed row height 36px, overscan 12
+  // TanStack Virtualizer v3: strictly fixed row height 36px, overscan 12 rows
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
@@ -309,18 +217,12 @@ export const ScreenerTable: React.FC = () => {
   });
 
   // Calculate sticky pinned column offsets
-  // Column 0 (star): width 38, left 0
-  // Column 1 (symbol): width 110, left 38
-  // Column 2 (companyName): width 180, left 148
   const getPinnedStyle = (colIndex: number): React.CSSProperties => {
     if (colIndex === 0) {
       return { position: 'sticky', left: 0, zIndex: 10 };
     }
     if (colIndex === 1) {
       return { position: 'sticky', left: 38, zIndex: 10 };
-    }
-    if (colIndex === 2) {
-      return { position: 'sticky', left: 148, zIndex: 10 };
     }
     return {};
   };
@@ -332,23 +234,21 @@ export const ScreenerTable: React.FC = () => {
     if (colIndex === 1) {
       return { position: 'sticky', left: 38, zIndex: 30 };
     }
-    if (colIndex === 2) {
-      return { position: 'sticky', left: 148, zIndex: 30 };
-    }
     return { zIndex: 20 };
   };
 
   return (
     <div
       ref={parentRef}
-      className="relative flex-1 w-full h-full overflow-auto bg-[#090d16] select-none focus:outline-none"
+      className="relative flex-1 w-full h-full overflow-auto bg-[#090d16] select-none focus:outline-none custom-scrollbar"
       role="grid"
+      aria-label="Indian Equities Screener Grid"
       aria-rowcount={rows.length}
       aria-colcount={columns.length}
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && selectedSymbol) {
-          // Open modal if symbol already selected
+          // Enter key selects active symbol
         }
       }}
     >
@@ -366,15 +266,16 @@ export const ScreenerTable: React.FC = () => {
           {table.getHeaderGroups().map((headerGroup) => (
             <div key={headerGroup.id} className="flex" role="row">
               {headerGroup.headers.map((header, idx) => {
-                const canSort = header.column.getCanSort();
-                const isSorted = sortConfig?.column === header.id ? sortConfig.direction : false;
+                const columnId = header.id as keyof Stock;
+                const isSorted = sortConfig.column === columnId ? sortConfig.direction : false;
                 const pinnedStyle = getHeaderPinnedStyle(idx);
-                const isPinned = idx <= 2;
+                const isPinned = idx <= 1;
 
                 return (
                   <div
                     key={header.id}
                     role="columnheader"
+                    aria-label={`Sort by ${header.id}`}
                     aria-sort={isSorted ? (isSorted === 'asc' ? 'ascending' : 'descending') : 'none'}
                     style={{
                       width: header.getSize(),
@@ -382,16 +283,8 @@ export const ScreenerTable: React.FC = () => {
                       ...pinnedStyle,
                     }}
                     onClick={() => {
-                      if (!canSort && header.id !== 'watchlist') {
-                        // Toggle sorting
-                        const cur = sortConfig?.column === header.id ? sortConfig.direction : null;
-                        if (!cur) {
-                          setSortConfig({ column: header.id as keyof Stock, direction: 'asc' });
-                        } else if (cur === 'asc') {
-                          setSortConfig({ column: header.id as keyof Stock, direction: 'desc' });
-                        } else {
-                          setSortConfig(null);
-                        }
+                      if (header.id !== 'watchlist') {
+                        setSortConfig(columnId); // Cycles: desc -> asc -> desc
                       }
                     }}
                     className={`flex items-center justify-between px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 select-none cursor-pointer border-r border-slate-800/80 hover:bg-slate-800/60 transition-colors ${
@@ -436,6 +329,7 @@ export const ScreenerTable: React.FC = () => {
                 key={row.original.symbol}
                 role="row"
                 aria-selected={isSelected}
+                aria-rowindex={virtualRow.index + 1}
                 tabIndex={0}
                 onClick={() => setSelectedSymbol(row.original.symbol)}
                 onKeyDown={(e) => {
@@ -460,7 +354,7 @@ export const ScreenerTable: React.FC = () => {
               >
                 {row.getVisibleCells().map((cell, idx) => {
                   const pinnedStyle = getPinnedStyle(idx);
-                  const isPinned = idx <= 2;
+                  const isPinned = idx <= 1;
                   const cellBg = isSelected
                     ? 'bg-[#141b34]'
                     : virtualRow.index % 2 === 0
@@ -471,6 +365,7 @@ export const ScreenerTable: React.FC = () => {
                     <div
                       key={cell.id}
                       role="gridcell"
+                      aria-label={`${cell.column.id}: ${cell.getValue()}`}
                       style={{
                         width: cell.column.getSize(),
                         minWidth: cell.column.getSize(),

@@ -266,7 +266,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="hidden lg:flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-surface-elevated border border-slate-800 text-slate-300">
             <Bookmark className="w-3.5 h-3.5 text-amber-400" />
             <span className="text-[11px]">Watchlist:</span>
-            <span className="font-mono font-semibold text-amber-300">{watchlist.size}</span>
+            <span className="font-mono font-semibold text-amber-300">{watchlist.length}</span>
           </div>
 
           <button
