@@ -180,4 +180,5 @@ d:/Stock Screener/
 
 Distributed under the MIT License. See `LICENSE` for more information.
 #   S t o c k - S c r e e n e r  
+ #   S t o c k - S c r e e n e r  
  
