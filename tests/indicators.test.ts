@@ -5,7 +5,10 @@ import {
   calculateEMA,
   calculateBollingerBands,
   calculateRSI,
+  VolumeProfile,
 } from '@/lib/indicators';
+import { generateOHLCV } from '@/lib/ohlcvGenerator';
+
 
 describe('Technical Indicator Formula Validations', () => {
   it('correctly calculates SMA(5) against official benchmark series', () => {
@@ -67,4 +70,73 @@ describe('Technical Indicator Formula Validations', () => {
     expect(rsiLoss[14]).toBe(0);
     expect(rsiLoss[15]).toBe(0);
   });
+
+  it('correctly aggregates Volume Profile across price buckets', () => {
+    const mockCandles = [
+      { open: 100, high: 110, low: 90, close: 105, volume: 1000, time: '2024-01-01' },
+      { open: 105, high: 115, low: 95, close: 110, volume: 2000, time: '2024-01-02' },
+      { open: 110, high: 120, low: 100, close: 115, volume: 3000, time: '2024-01-03' },
+    ];
+    const profile = VolumeProfile(mockCandles, 10);
+    expect(profile.length).toBe(10);
+    const totalAggregatedVolume = profile.reduce((sum, b) => sum + b.volume, 0);
+    expect(totalAggregatedVolume).toBe(6000);
+  });
+
+  it('generates 252 trading days of synthetic OHLCV data without weekends', () => {
+    const mockStock = {
+      symbol: 'RELIANCE',
+      companyName: 'Reliance Industries Ltd',
+      sector: 'Energy' as const,
+      industry: 'Oil & Gas',
+      marketCapCategory: 'Large Cap' as const,
+      indexMembership: ['NIFTY 50'],
+      lastPrice: 2500,
+      previousClose: 2480,
+      dayOpen: 2490,
+      dayHigh: 2520,
+      dayLow: 2470,
+      changePercent: 0.8,
+      changeAbsolute: 20,
+      volume: 1000000,
+      avgVolume20D: 1000000,
+      week52High: 2800,
+      week52Low: 2100,
+      marketCap: 1700000,
+      pe: 25,
+      pb: 2.5,
+      dividendYield: 0.5,
+      eps: 100,
+      roe: 12,
+      roce: 14,
+      debtToEquity: 0.4,
+      currentRatio: 1.2,
+      promoterHolding: 50,
+      revenueGrowthYoY: 15,
+      profitGrowthYoY: 18,
+      rsi14: 55,
+      sma50: 2450,
+      sma200: 2350,
+      beta: 1.0,
+      atr: 35,
+      macdSignal: 'Bullish' as const,
+      bollingerPosition: 'Within' as const,
+      volumeVsAvg: 'Above' as const,
+    };
+
+    const candles = generateOHLCV(mockStock, 252);
+    expect(candles.length).toBe(252);
+
+    // Verify all dates are weekdays
+    for (const c of candles) {
+      const date = new Date(c.time);
+      const day = date.getDay();
+      expect(day).not.toBe(0); // Sunday
+      expect(day).not.toBe(6); // Saturday
+      expect(c.high).toBeGreaterThanOrEqual(c.low);
+      expect(c.open).toBeGreaterThan(0);
+      expect(c.close).toBeGreaterThan(0);
+    }
+  });
 });
+

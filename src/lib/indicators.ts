@@ -216,3 +216,11 @@ export function calculateVolumeProfile(
     percentage: totalVolume > 0 ? Number(((b.volume / totalVolume) * 100).toFixed(1)) : 0,
   }));
 }
+
+// Aliases matching Step 4 specifications
+export const SMA = calculateSMA;
+export const EMA = calculateEMA;
+export const BollingerBands = calculateBollingerBands;
+export const RSI = calculateRSI;
+export const VolumeProfile = calculateVolumeProfile;
+

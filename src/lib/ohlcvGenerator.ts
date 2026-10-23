@@ -1,4 +1,8 @@
-import { OHLCVData, Stock } from '@/types/stock';
+import { OHLCVData, Stock, OHLCV } from '@/types/stock';
+
+export type { OHLCV };
+export const generateOHLCV = generateOHLCVData;
+
 
 /**
  * Generate 252 trading days (1 trading year) of realistic synthetic daily OHLCV candlestick data

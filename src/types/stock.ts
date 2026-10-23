@@ -92,3 +92,6 @@ export interface OHLCVData {
   close: number;
   volume: number;
 }
+
+export type OHLCV = OHLCVData;
+
